@@ -1,0 +1,121 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-heading: var(--font-heading);
+  
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+:root {
+  /* Bộ màu WAO AI */
+  --background: #FFFFFF;
+  --foreground: #0A0A0A;
+  
+  --card: #FFFFFF;
+  --card-foreground: #0A0A0A;
+  
+  --popover: #FFFFFF;
+  --popover-foreground: #0A0A0A;
+  
+  --primary: #16A34A; /* Xanh lá chủ đạo */
+  --primary-foreground: #FFFFFF;
+  
+  --secondary: #F5F5F5;
+  --secondary-foreground: #0A0A0A;
+  
+  --muted: #F5F5F5;
+  --muted-foreground: #6B7280;
+  
+  --accent: #DCFCE7; /* Green light */
+  --accent-foreground: #15803D;
+  
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  
+  --border: #E5E7EB;
+  --input: #E5E7EB;
+  --ring: #16A34A;
+  
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: #0A0A0A;
+  --foreground: #FFFFFF;
+  
+  --card: #121212;
+  --card-foreground: #FFFFFF;
+  
+  --popover: #121212;
+  --popover-foreground: #FFFFFF;
+  
+  --primary: #16A34A;
+  --primary-foreground: #FFFFFF;
+  
+  --secondary: #1A1A1A;
+  --secondary-foreground: #FFFFFF;
+  
+  --muted: #1A1A1A;
+  --muted-foreground: #9CA3AF;
+  
+  --accent: #15803D;
+  --accent-foreground: #FFFFFF;
+  
+  --destructive: #7F1D1D;
+  --destructive-foreground: #FFFFFF;
+  
+  --border: #262626;
+  --input: #262626;
+  --ring: #16A34A;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading tracking-tight;
+  }
+}
+
+/* Custom Utilities */
+.glass {
+  @apply bg-white/70 dark:bg-black/70 backdrop-blur-md border border-white/20 dark:border-white/10;
+}
+
+.text-gradient {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-green-600 to-green-400;
+}
