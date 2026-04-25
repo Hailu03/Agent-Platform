@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: wao_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: waoai
+    ports:
+      - "5435:5432"
+    volumes:
+      - wao_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: wao_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - wao_redis_data:/data
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: wao_neo4j
+    restart: always
+    environment:
+      NEO4J_AUTH: neo4j/waoai_password
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - wao_neo4j_data:/data
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: wao_qdrant
+    restart: always
+    ports:
+      - "6333:6333"
+    volumes:
+      - wao_qdrant_data:/qdrant/storage
+
+  minio:
+    image: minio/minio:latest
+    container_name: wao_minio
+    restart: always
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - wao_minio_data:/data
+    command: server /data --console-address ":9001"
+
+volumes:
+  wao_postgres_data:
+  wao_redis_data:
+  wao_neo4j_data:
+  wao_qdrant_data:
+  wao_minio_data:
