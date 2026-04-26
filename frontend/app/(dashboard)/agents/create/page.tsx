@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -50,7 +50,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { useNotifications } from "@/components/shared/NotificationSystem";
+import { useNotifications } from "@/hooks/use-notifications";
 import { fetchWithAuth } from "@/lib/api";
 
 const PROVIDER_MODELS: Record<string, { value: string, label: string }[]> = {
@@ -97,7 +97,19 @@ const PROVIDER_MODELS: Record<string, { value: string, label: string }[]> = {
   ],
 };
 
-function ToolItem({ name, desc, active = false }: { name: string, desc: string, active?: boolean }) {
+function ToolItem({ 
+  name, 
+  desc, 
+  active = false,
+  onToggle,
+  onDelete
+}: { 
+  name: string, 
+  desc: string, 
+  active?: boolean,
+  onToggle?: () => void,
+  onDelete?: () => void
+}) {
   const getIcon = (name: string) => {
     if (name.includes("Search")) return <Terminal className="w-4 h-4 text-blue-500" />;
     if (name.includes("Interpreter") || name.includes("SQL")) return <Cpu className="w-4 h-4 text-purple-500" />;
@@ -123,28 +135,84 @@ function ToolItem({ name, desc, active = false }: { name: string, desc: string, 
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         {active && (
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] mr-2" />
         )}
 
-        <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex items-center justify-center h-8 w-8 rounded-[0.5rem] hover:bg-white hover:shadow-sm border border-transparent hover:border-border transition-all outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-            <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-40 rounded-[0.5rem] border-muted-foreground/20 shadow-2xl p-1.5">
-            <DropdownMenuItem className="rounded-[0.4rem] gap-2 text-xs font-bold cursor-pointer">
-              <Edit2 className="w-3.5 h-3.5 text-blue-500" /> Chỉnh sửa
-            </DropdownMenuItem>
-            <DropdownMenuItem className="rounded-[0.4rem] gap-2 text-xs font-bold cursor-pointer">
-              <Power className="w-3.5 h-3.5 text-amber-500" /> {active ? "Tạm tắt" : "Kích hoạt"}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator className="my-1" />
-            <DropdownMenuItem className="rounded-[0.4rem] gap-2 text-xs font-bold text-destructive cursor-pointer">
-              <Trash2 className="w-3.5 h-3.5" /> Xóa
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-lg hover:bg-amber-500/10 text-muted-foreground hover:text-amber-600 transition-all"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle?.();
+          }}
+          title={active ? "Tạm tắt" : "Kích hoạt"}
+        >
+          <Power className="w-4 h-4" />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete?.();
+          }}
+          title="Xóa"
+        >
+          <Trash2 className="w-4 h-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDialog({ 
+  open, 
+  onClose, 
+  onConfirm, 
+  title, 
+  description 
+}: { 
+  open: boolean, 
+  onClose: () => void, 
+  onConfirm: () => void, 
+  title: string, 
+  description: string 
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 animate-in fade-in duration-300">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-md" onClick={onClose} />
+      <div className="relative bg-white dark:bg-zinc-900 rounded-[1.5rem] p-8 max-w-sm w-full shadow-2xl border border-white/20 animate-in zoom-in-95 slide-in-from-bottom-4 duration-300">
+        <div className="w-14 h-14 rounded-2xl bg-destructive/10 flex items-center justify-center mb-6">
+          <Trash2 className="w-7 h-7 text-destructive" />
+        </div>
+        <h3 className="text-xl font-bold text-foreground mb-2">{title}</h3>
+        <p className="text-sm text-muted-foreground leading-relaxed mb-8">{description}</p>
+        
+        <div className="flex gap-3">
+          <Button 
+            variant="ghost" 
+            className="flex-1 rounded-xl h-12 font-bold hover:bg-muted" 
+            onClick={onClose}
+          >
+            Hủy bỏ
+          </Button>
+          <Button 
+            className="flex-1 rounded-xl h-12 font-bold bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-lg shadow-destructive/20" 
+            onClick={() => {
+              onConfirm();
+              onClose();
+            }}
+          >
+            Đồng ý xóa
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -161,7 +229,7 @@ function CreateAgentContent() {
   const [showPreview, setShowPreview] = useState(true);
   const [isOtherSpecialty, setIsOtherSpecialty] = useState(false);
   const [messages, setMessages] = useState<{ role: string, content: string, thinking?: string, done?: boolean }[]>([
-    { role: "assistant", content: "Chào bạn! Tôi là AI Agent bạn đang thiết lập. Hãy thử nhắn tin để kiểm tra cấu hình của tôi nhé.", done: true }
+    { role: "assistant", content: "Chào bạn! Tôi là AI Agent của bạn. Hãy thiết lập cấu hình bên trái rồibắt đầu hội thoại nhé.", done: true }
   ]);
 
   const [formData, setFormData] = useState({
@@ -172,14 +240,37 @@ function CreateAgentContent() {
     model_name: "gpt-4o",
     api_key: "",
     instructions: "",
-    tools: ["Web Search", "Code Interpreter"],
-    skills: ["SQL Generator", "Email Writer"],
+    tools: [] as { name: string, is_active: boolean }[],
+    skills: [] as { name: string, is_active: boolean }[],
     knowledge_files: [] as { filename: string, url: string, object_name: string }[],
   });
 
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [availableTools, setAvailableTools] = useState<{name: string, description: string, icon: string}[]>([]);
+  const [showAddTool, setShowAddTool] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => void;
+  }>({
+    open: false,
+    title: "",
+    description: "",
+    onConfirm: () => {},
+  });
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   useEffect(() => {
     console.log("DEBUG: AgentId detected:", agentId);
@@ -204,6 +295,13 @@ function CreateAgentContent() {
             console.log("DEBUG: Data received from Backend:", data);
 
             // Cập nhật state với dữ liệu thực tế
+            const normalizeList = (list: any[]) => {
+              return (list || []).map(item => {
+                if (typeof item === 'string') return { name: item, is_active: true };
+                return item;
+              });
+            };
+
             setFormData({
               name: data.name || "",
               description: data.description || "",
@@ -212,8 +310,8 @@ function CreateAgentContent() {
               model_name: data.model_name || "gpt-4o",
               api_key: data.api_key || "",
               instructions: data.instructions || "",
-              tools: Array.isArray(data.tools) ? data.tools : [],
-              skills: Array.isArray(data.skills) ? data.skills : [],
+              tools: normalizeList(data.tools),
+              skills: normalizeList(data.skills),
               knowledge_files: (data.knowledge_files || []).map((name: string) => ({
                 filename: name.split('/').pop() || name,
                 url: "",
@@ -252,6 +350,20 @@ function CreateAgentContent() {
       };
       fetchAgent();
     }
+
+    // Luôn fetch danh sách tool hỗ trợ từ server
+    const fetchAvailableTools = async () => {
+      try {
+        const res = await fetchWithAuth("/agents/tools/available");
+        if (res.ok) {
+          const data = await res.json();
+          setAvailableTools(data);
+        }
+      } catch (error) {
+        console.error("Lỗi fetch tools:", error);
+      }
+    };
+    fetchAvailableTools();
   }, [agentId]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -404,7 +516,7 @@ function CreateAgentContent() {
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="general" className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <TabsContent value="general" className="space-y-2 animate-in fade-in duration-200 min-h-[500px]">
               <section className="space-y-2">
                 <div className="flex items-center gap-2 px-1">
                   <div className="w-1.5 h-6 bg-primary rounded-full" />
@@ -417,7 +529,7 @@ function CreateAgentContent() {
                       <div className="space-y-4">
                         <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Tên Agent</label>
                         <Input
-                          placeholder="Ví dụ: Trợ lý Phân tích Dữ liệu WAO"
+                          placeholder="Nhập tên cho Agent..."
                           className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50"
                           value={formData.name}
                           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -569,7 +681,7 @@ function CreateAgentContent() {
             </TabsContent>
 
             {/* --- Tab 2: Intelligence --- */}
-            <TabsContent value="intelligence" className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <TabsContent value="intelligence" className="space-y-8 animate-in fade-in duration-200 min-h-[500px]">
               <section className="space-y-4">
                 <div className="flex items-center gap-2 px-1">
                   <div className="w-1.5 h-6 bg-blue-500 rounded-full" />
@@ -586,7 +698,7 @@ function CreateAgentContent() {
                         <Button variant="secondary" size="sm" className="rounded-[0.5rem] h-8 text-[11px] font-bold bg-white/80 backdrop-blur border shadow-sm">Thư viện chỉ dẫn mẫu</Button>
                       </div>
                       <Textarea
-                        placeholder="Bạn là một trợ lý chuyên nghiệp tại WAO AI. Nhiệm vụ của bạn là..."
+                        placeholder="Nhập chỉ dẫn chi tiết cho Agent tại đây..."
                         className="rounded-[0.5rem] min-h-[300px] p-6 border-muted-foreground/20 bg-background/50 focus:ring-primary/10 transition-all resize-none leading-relaxed text-sm font-medium"
                         value={formData.instructions}
                         onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
@@ -654,7 +766,7 @@ function CreateAgentContent() {
             </TabsContent>
 
             {/* --- Tab 3: Capabilities --- */}
-            <TabsContent value="capabilities" className="space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <TabsContent value="capabilities" className="space-y-10 animate-in fade-in duration-200 min-h-[500px]">
               {/* Section 1: Tools */}
               <section className="space-y-4">
                 <div className="flex items-center justify-between px-1">
@@ -662,16 +774,65 @@ function CreateAgentContent() {
                     <div className="w-1.5 h-5 bg-blue-500 rounded-full" />
                     <h2 className="text-lg font-bold text-foreground/90">Công cụ hỗ trợ (Tools)</h2>
                   </div>
-                  <Button variant="ghost" className="rounded-lg h-8 px-3 text-[11px] font-bold text-primary hover:bg-primary/5 transition-all">
-                    <Plus className="w-3.5 h-3.5 mr-1" /> Quản lý công cụ
-                  </Button>
+                    <Button 
+                      variant="ghost" 
+                      className="rounded-lg h-8 px-3 text-[11px] font-bold text-primary hover:bg-primary/5 transition-all"
+                      onClick={() => setShowAddTool(true)}
+                    >
+                      <Plus className="w-3.5 h-3.5 mr-1" /> Quản lý công cụ
+                    </Button>
                 </div>
-
-                <div className="flex flex-col border rounded-xl overflow-hidden bg-white/50 dark:bg-white/[0.02] shadow-sm">
-                  <ToolItem name="Tìm kiếm Web" desc="Truy cập internet thời gian thực" active />
-                  <ToolItem name="Thực thi Code" desc="Chạy mã Python và phân tích dữ liệu" active />
-                  <ToolItem name="DALL-E 3" desc="Tạo hình ảnh nghệ thuật từ văn bản" />
-                  <ToolItem name="Wolfram Alpha" desc="Tính toán toán học và dữ liệu chuẩn" />
+                <div className="flex flex-col border rounded-xl bg-white/50 dark:bg-white/[0.02] shadow-sm">
+                  {formData.tools.length > 0 ? (
+                    (() => {
+                      // Tạo lookup map để tối ưu hiệu năng
+                      const toolMap = new Map(availableTools.map(t => [t.name, t]));
+                      
+                      return formData.tools.map((toolObj) => {
+                        const toolName = toolObj.name;
+                        const toolInfo = toolMap.get(toolName) || {
+                          name: toolName,
+                          description: "Công cụ đã được cấu hình",
+                          icon: "Terminal"
+                        };
+                        return (
+                          <ToolItem 
+                            key={toolName}
+                            name={toolInfo.name} 
+                            desc={toolInfo.description} 
+                            active={toolObj.is_active} 
+                            onToggle={() => {
+                              setFormData(prev => ({
+                                ...prev,
+                                tools: prev.tools.map(t => 
+                                  t.name === toolName ? { ...t, is_active: !t.is_active } : t
+                                )
+                              }));
+                            }}
+                            onDelete={() => {
+                              setConfirmConfig({
+                                open: true,
+                                title: `Xóa công cụ ${toolName}?`,
+                                description: "Công cụ này sẽ bị gỡ bỏ khỏi Agent. Bạn có thể thêm lại bất cứ lúc nào từ thư viện.",
+                                onConfirm: () => {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    tools: prev.tools.filter(t => t.name !== toolName)
+                                  }));
+                                  addNotification("info", "Đã gỡ bỏ", `Đã gỡ bỏ công cụ ${toolName}.`);
+                                }
+                              });
+                            }}
+                          />
+                        );
+                      });
+                    })()
+                  ) : (
+                    <div className="p-10 text-center space-y-3">
+                      <Wrench className="w-8 h-8 text-muted-foreground/30 mx-auto" />
+                      <p className="text-xs text-muted-foreground font-medium">Chưa có công cụ nào được kích hoạt</p>
+                    </div>
+                  )}
                 </div>
               </section>
 
@@ -682,15 +843,49 @@ function CreateAgentContent() {
                     <div className="w-1.5 h-5 bg-purple-500 rounded-full" />
                     <h2 className="text-lg font-bold text-foreground/90">Kỹ năng chuyên sâu (Skills)</h2>
                   </div>
-                  <Button variant="ghost" className="rounded-lg h-8 px-3 text-[11px] font-bold text-primary hover:bg-primary/5 transition-all">
-                    <Plus className="w-3.5 h-3.5 mr-1" /> Thêm kỹ năng
-                  </Button>
+                    <Button variant="ghost" className="rounded-lg h-8 px-3 text-[11px] font-bold text-primary hover:bg-primary/5 transition-all">
+                      <Plus className="w-3.5 h-3.5 mr-1" /> Thêm kỹ năng
+                    </Button>
                 </div>
 
-                <div className="flex flex-col border rounded-xl overflow-hidden bg-white/50 dark:bg-white/[0.02] shadow-sm">
-                  <ToolItem name="Trình tạo SQL" desc="Chuyển đổi ngôn ngữ tự nhiên sang SQL" active />
-                  <ToolItem name="Soạn thảo Email" desc="Soạn thư chuyên nghiệp theo yêu cầu" active />
-                  <ToolItem name="Tóm tắt Nội dung" desc="Tóm tắt văn bản dài và video" />
+                <div className="flex flex-col border rounded-xl bg-white/50 dark:bg-white/[0.02] shadow-sm">
+                  {formData.skills.length > 0 ? (
+                    formData.skills.map((skillObj) => (
+                      <ToolItem 
+                        key={skillObj.name}
+                        name={skillObj.name} 
+                        desc="Kỹ năng nghiệp vụ chuyên sâu" 
+                        active={skillObj.is_active} 
+                        onToggle={() => {
+                          setFormData(prev => ({
+                            ...prev,
+                            skills: prev.skills.map(s => 
+                              s.name === skillObj.name ? { ...s, is_active: !s.is_active } : s
+                            )
+                          }));
+                        }}
+                        onDelete={() => {
+                          setConfirmConfig({
+                            open: true,
+                            title: `Xóa kỹ năng ${skillObj.name}?`,
+                            description: "Toàn bộ kỹ năng chuyên sâu sẽ bị gỡ bỏ. Bạn có thể thêm lại chúng sau này.",
+                            onConfirm: () => {
+                              setFormData(prev => ({
+                                ...prev,
+                                skills: prev.skills.filter(s => s.name !== skillObj.name)
+                              }));
+                              addNotification("info", "Đã gỡ bỏ", `Đã gỡ bỏ kỹ năng ${skillObj.name}.`);
+                            }
+                          });
+                        }}
+                      />
+                    ))
+                  ) : (
+                    <div className="p-10 text-center space-y-3">
+                      <Sparkles className="w-8 h-8 text-muted-foreground/30 mx-auto" />
+                      <p className="text-xs text-muted-foreground font-medium">Chưa có kỹ năng nào được thiết lập</p>
+                    </div>
+                  )}
                 </div>
               </section>
 
@@ -706,9 +901,11 @@ function CreateAgentContent() {
                   </Button>
                 </div>
 
-                <div className="flex flex-col border rounded-xl overflow-hidden bg-white/50 dark:bg-white/[0.02] shadow-sm">
-                  <ToolItem name="Support Bot" desc="Agent hỗ trợ khách hàng nội bộ" active />
-                  <ToolItem name="Data Analyst Agent" desc="Agent chuyên sâu về thống kê dữ liệu" />
+                <div className="flex flex-col border rounded-xl bg-white/50 dark:bg-white/[0.02] shadow-sm">
+                  <div className="p-10 text-center space-y-3">
+                    <Network className="w-8 h-8 text-muted-foreground/30 mx-auto" />
+                    <p className="text-xs text-muted-foreground font-medium">Chưa có kết nối hệ sinh thái nào</p>
+                  </div>
                 </div>
               </section>
             </TabsContent>
@@ -821,6 +1018,7 @@ function CreateAgentContent() {
                   </div>
                 </div>
               ))}
+              <div ref={messagesEndRef} />
             </div>
 
             {/* Chat Input */}
@@ -934,6 +1132,95 @@ function CreateAgentContent() {
           </div>
         </div>
       )}
+
+      {/* Tool Selection Modal Overlay */}
+      {showAddTool && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 animate-in fade-in duration-500">
+          <div 
+            className="absolute inset-0 bg-zinc-950/40 backdrop-blur-md" 
+            onClick={() => setShowAddTool(false)}
+          />
+          <Card className="w-full max-w-2xl relative z-10 shadow-[0_32px_64px_-12px_rgba(0,0,0,0.2)] border-white/20 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl animate-in zoom-in-95 duration-300 overflow-hidden rounded-[2rem]">
+            <CardHeader className="flex flex-row items-center justify-between border-b bg-muted/20">
+              <div>
+                <CardTitle className="text-lg font-bold">Thư viện Công cụ</CardTitle>
+                <CardDescription className="text-xs">Chọn các công cụ để mở rộng khả năng cho Agent của bạn.</CardDescription>
+              </div>
+              <Button variant="ghost" size="icon" className="rounded-full" onClick={() => setShowAddTool(false)}>
+                <X className="w-4 h-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {availableTools.map((tool) => {
+                    const existingTool = formData.tools.find(t => t.name === tool.name);
+                    const isActive = !!existingTool;
+                    return (
+                      <div 
+                        key={tool.name}
+                        className={cn(
+                          "p-4 border rounded-xl transition-all duration-300 flex items-start gap-4 group relative overflow-hidden",
+                          isActive 
+                            ? "bg-primary/5 border-primary/30" 
+                            : "bg-white hover:border-primary/50 hover:shadow-md cursor-pointer"
+                        )}
+                        onClick={() => {
+                          if (!isActive) {
+                            setFormData(prev => ({
+                              ...prev,
+                              tools: [...prev.tools, { name: tool.name, is_active: true }]
+                            }));
+                            addNotification("success", "Đã thêm công cụ", `Đã thêm ${tool.name} thành công.`);
+                          }
+                        }}
+                      >
+                      <div className={cn(
+                        "w-12 h-12 rounded-xl flex items-center justify-center shrink-0 border transition-all",
+                        isActive ? "bg-primary text-white" : "bg-muted group-hover:bg-primary/10 group-hover:text-primary"
+                      )}>
+                        {isActive ? <Bot className="w-6 h-6" /> : <Terminal className="w-6 h-6" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-sm font-bold truncate">{tool.name}</p>
+                          {isActive && (
+                            <span className="text-[9px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">ĐÃ THÊM</span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
+                          {tool.description}
+                        </p>
+                      </div>
+                      
+                      {!isActive && (
+                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Plus className="w-4 h-4 text-primary" />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+            <div className="p-4 border-t bg-muted/10 flex justify-end">
+              <Button 
+                onClick={() => setShowAddTool(false)}
+                className="rounded-lg h-10 px-8 text-xs font-bold bg-primary text-white"
+              >
+                Xong
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      <ConfirmDialog 
+        open={confirmConfig.open}
+        onClose={() => setConfirmConfig({ ...confirmConfig, open: false })}
+        onConfirm={confirmConfig.onConfirm}
+        title={confirmConfig.title}
+        description={confirmConfig.description}
+      />
     </div>
   );
 }

@@ -15,67 +15,19 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { fetchWithAuth } from "@/lib/api";
-
-interface Agent {
-  id: string;
-  name: string;
-  description: string;
-  model_provider: string;
-  model_name: string;
-  is_active: boolean;
-}
+import { useAgents, Agent } from "@/hooks/use-agents";
 
 export default function AgentsPage() {
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { agents, loading, toggleAgentStatus, deleteAgent } = useAgents();
   const [filter, setFilter] = useState<"all" | "running" | "paused">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  const fetchAgents = async () => {
-    try {
-      const res = await fetchWithAuth("/agents/");
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setAgents(data);
-      } else {
-        setAgents([]);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchAgents();
-  }, []);
-
   const handleToggleStatus = async (id: string, currentStatus: boolean) => {
-    try {
-      const res = await fetchWithAuth(`/agents/${id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ is_active: !currentStatus }),
-      });
-      if (res.ok) fetchAgents();
-    } catch (error) {
-      console.error(error);
-    }
+    await toggleAgentStatus(id, currentStatus);
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Bạn có chắc chắn muốn xóa Agent này?")) return;
-    try {
-      const res = await fetchWithAuth(`/agents/${id}`, {
-        method: "DELETE",
-      });
-      if (res.ok) fetchAgents();
-    } catch (error) {
-      console.error(error);
-    }
+    await deleteAgent(id);
   };
 
   const filteredAgents = agents.filter(agent => {

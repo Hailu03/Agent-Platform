@@ -10,8 +10,8 @@ class AgentBase(BaseModel):
     model_name: str = "gpt-4o"
     api_key: Optional[str] = None
     instructions: Optional[str] = None
-    tools: List[str] = []
-    skills: List[str] = []
+    tools: List[Any] = [] # Can be string or {"name": str, "is_active": bool}
+    skills: List[Any] = []
     sub_agents: List[str] = []
     workflow_id: Optional[str] = None
     triggers: List[dict] = []
@@ -29,8 +29,8 @@ class AgentUpdate(BaseModel):
     model_name: Optional[str] = None
     api_key: Optional[str] = None
     instructions: Optional[str] = None
-    tools: Optional[List[str]] = None
-    skills: Optional[List[str]] = None
+    tools: Optional[List[Any]] = None
+    skills: Optional[List[Any]] = None
     sub_agents: Optional[List[str]] = None
     workflow_id: Optional[str] = None
     triggers: Optional[List[dict]] = None

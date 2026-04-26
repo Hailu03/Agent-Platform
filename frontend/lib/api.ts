@@ -18,7 +18,7 @@ export async function fetchWithAuth(endpoint: string, options: FetchOptions = {}
 
   const url = endpoint.startsWith("http") ? endpoint : `${API_URL}${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
   
-  let response = await fetch(url, { ...options, headers });
+  let response = await fetch(url, { ...options, headers, credentials: "include" });
 
   // Handle 401 Unauthorized - Attempt Token Refresh
   if (response.status === 401 && typeof window !== "undefined") {
@@ -30,7 +30,8 @@ export async function fetchWithAuth(endpoint: string, options: FetchOptions = {}
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-        }
+        },
+        credentials: "include"
       });
 
       if (refreshRes.ok) {
@@ -45,7 +46,7 @@ export async function fetchWithAuth(endpoint: string, options: FetchOptions = {}
           Authorization: `Bearer ${newToken}`,
         };
         
-        return await fetch(url, { ...options, headers: newHeaders });
+        return await fetch(url, { ...options, headers: newHeaders, credentials: "include" });
       } else {
         // Refresh failed, clear token and redirect
         console.error("Refresh failed, logging out...");

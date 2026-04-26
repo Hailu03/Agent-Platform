@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useAgents } from "@/hooks/use-agents";
 
 interface KnowledgeItem {
   id: string;
@@ -33,46 +34,24 @@ interface KnowledgeItem {
 }
 
 export default function KnowledgePage() {
-  const [items, setItems] = useState<KnowledgeItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { agents, loading } = useAgents();
   const [searchQuery, setSearchQuery] = useState("");
 
-  useEffect(() => {
-    const fetchAgents = async () => {
-      const token = localStorage.getItem("access_token");
-      try {
-        const res = await fetch("http://localhost:8000/api/v1/agents/", {
-          headers: { "Authorization": `Bearer ${token}` }
+  const items: KnowledgeItem[] = [];
+  agents.forEach(agent => {
+    if (agent.knowledge_files) {
+      agent.knowledge_files.forEach((file: string) => {
+        items.push({
+          id: `${agent.id}-${file}`,
+          fileName: file.split("/").pop() || file,
+          objectName: file,
+          agentId: agent.id,
+          agentName: agent.name,
+          fileType: file.split(".").pop()?.toUpperCase() || "FILE"
         });
-        const data = await res.json();
-        
-        if (Array.isArray(data)) {
-          const allDocs: KnowledgeItem[] = [];
-          data.forEach(agent => {
-            if (agent.knowledge_files) {
-              agent.knowledge_files.forEach((file: string) => {
-                allDocs.push({
-                  id: `${agent.id}-${file}`,
-                  fileName: file.split("/").pop() || file,
-                  objectName: file,
-                  agentId: agent.id,
-                  agentName: agent.name,
-                  fileType: file.split(".").pop()?.toUpperCase() || "FILE"
-                });
-              });
-            }
-          });
-          setItems(allDocs);
-        }
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAgents();
-  }, []);
+      });
+    }
+  });
 
   const filteredItems = items.filter(item => 
     item.fileName.toLowerCase().includes(searchQuery.toLowerCase()) ||

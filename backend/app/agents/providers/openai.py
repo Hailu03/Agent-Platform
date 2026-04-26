@@ -17,3 +17,7 @@ class OpenAIProvider(BaseLLMProvider):
     async def astream(self, messages: Any, **kwargs: Any) -> AsyncIterator[str]:
         async for chunk in self.client.astream(messages, **kwargs):
             yield chunk.content
+
+    def bind_tools(self, tools: list) -> "OpenAIProvider":
+        self.client = self.client.bind_tools(tools)
+        return self

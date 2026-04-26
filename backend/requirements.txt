@@ -20,3 +20,5 @@ bcrypt>=4.1.0
 google-auth==2.49.2
 httpx==0.28.1
 boto3>=1.34.0
+beautifulsoup4>=4.12.0
+trafilatura>=1.9.0

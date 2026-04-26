@@ -1,17 +1,21 @@
 import type { Metadata } from "next";
-import { Outfit, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+import { Inter, Be_Vietnam_Pro, JetBrains_Mono } from "next/font/google";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import { NotificationProvider } from "@/components/shared/NotificationSystem";
 import "./globals.css";
 
-const outfit = Outfit({
+// Cấu hình Inter chuyên nghiệp cho Heading
+const inter = Inter({
+  subsets: ["latin", "vietnamese"],
   variable: "--font-heading",
-  subsets: ["latin", "latin-ext"],
+  weight: ["500", "600", "700"], // 600 là đẹp nhất cho Title
 });
 
-const plusJakarta = Plus_Jakarta_Sans({
+// Be Vietnam Pro cho nội dung cực mượt
+const beVietnam = Be_Vietnam_Pro({
+  subsets: ["vietnamese"],
+  weight: ["400", "500", "600"],
   variable: "--font-sans",
-  subsets: ["latin", "latin-ext"],
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -30,8 +34,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="vi" className="h-full antialiased">
-      <body className={`${plusJakarta.variable} ${outfit.variable} ${jetbrainsMono.variable} font-sans min-h-full flex flex-col`}>
+    <html lang="vi" className="h-full antialiased" suppressHydrationWarning>
+      <body className={`${beVietnam.variable} ${inter.variable} ${jetbrainsMono.variable} font-sans min-h-full flex flex-col`}>
         <GoogleOAuthProvider clientId={process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""}>
           <NotificationProvider>
             {children}

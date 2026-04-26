@@ -16,8 +16,20 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function LandingPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Kiểm tra session cũ
+    const token = localStorage.getItem("access_token");
+    if (token) {
+      router.push("/dashboard");
+    }
+  }, [router]);
+
   return (
     <div className="flex flex-col min-h-screen bg-background overflow-hidden">
       {/* Navigation */}
@@ -109,6 +121,8 @@ export default function LandingPage() {
                     src="/dashboard-preview.png" 
                     alt="WAO AI Dashboard Mockup" 
                     fill
+                    priority
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 1024px"
                     className="object-cover group-hover:scale-[1.01] transition-transform duration-700"
                   />
                 </div>

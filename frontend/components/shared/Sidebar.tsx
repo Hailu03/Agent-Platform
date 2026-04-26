@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { ChevronDown, ChevronRight, FileText, Zap, Link2, Share2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAgents } from "@/hooks/use-agents";
 
 interface SubItem {
   id: string;
@@ -42,21 +43,7 @@ const menuItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [agents, setAgents] = useState<any[]>([]);
-
-  useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (!token) return;
-
-    fetch("http://localhost:8000/api/v1/agents/", {
-      headers: { "Authorization": `Bearer ${token}` }
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (Array.isArray(data)) setAgents(data);
-      })
-      .catch(console.error);
-  }, []);
+  const { agents } = useAgents();
 
   const toggleExpand = (name: string) => {
     setExpanded(prev => ({ ...prev, [name]: !prev[name] }));

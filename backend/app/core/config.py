@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
     MINIO_BUCKET_NAME: str = "agents"
 
+    # Search
+    SEARXNG_URL: str = "http://localhost:8081"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 settings = Settings()

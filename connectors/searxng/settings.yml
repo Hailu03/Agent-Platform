@@ -1,0 +1,47 @@
+# SearXNG Settings cho WAO AI
+use_default_settings: true
+
+server:
+  port: 8080
+  bind_address: "0.0.0.0"
+  secret_key: "wao_ai_agent_platform_secret_key_2026"
+  limiter: false
+  image_proxy: true
+
+search:
+  safe_search: 0
+  autocomplete: "google"
+  formats:
+    - html
+    - json
+
+ui:
+  theme: simple
+
+engines:
+  # Tắt các engine mặc định hay báo lỗi log
+  - name: wikidata
+    engine: wikidata
+    disabled: true
+  - name: ahmia
+    engine: ahmia
+    disabled: true
+  - name: torch
+    engine: torch
+    disabled: true
+
+  # Cấu hình các engine chính
+  - name: google
+    engine: google
+    shortcut: g
+    timeout: 3.0
+    
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    timeout: 3.0
+
+  - name: bing
+    engine: bing
+    shortcut: b
+    timeout: 3.0

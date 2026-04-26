@@ -13,3 +13,8 @@ class BaseLLMProvider(ABC):
     async def astream(self, messages: Any, **kwargs: Any) -> AsyncIterator[str]:
         """Stream the LLM response."""
         pass
+
+    @abstractmethod
+    def bind_tools(self, tools: list) -> "BaseLLMProvider":
+        """Bind tools to the provider and return the provider instance."""
+        pass

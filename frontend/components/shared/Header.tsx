@@ -16,49 +16,21 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { NotificationBell } from "./NotificationBell";
-import { useNotifications } from "./NotificationSystem";
+import { useNotifications } from "@/hooks/use-notifications";
+import { useAuth } from "@/hooks/use-auth";
 import { fetchWithAuth } from "@/lib/api";
 
 export function Header() {
-  const router = useRouter();
   const pathname = usePathname();
-  const [user, setUser] = useState<{ full_name: string; email: string } | null>(null);
+  const { user, logout } = useAuth();
   const [mounted, setMounted] = useState(false);
-  const { addNotification } = useNotifications();
 
   useEffect(() => {
     setMounted(true);
-    const fetchUser = async () => {
-      try {
-        const resp = await fetchWithAuth("/auth/me");
-        
-        if (resp.ok) {
-          const data = await resp.json();
-          setUser(data);
-        } else {
-          setUser(null);
-        }
-      } catch (error) {
-        console.error("Failed to fetch user:", error);
-        setUser(null);
-      }
-    };
-
-    fetchUser();
   }, []);
 
   const handleLogout = async () => {
-    try {
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/logout`, { method: "POST" });
-      localStorage.removeItem("access_token");
-      addNotification("info", "Đã đăng xuất", "Hẹn gặp lại bạn sớm!");
-      router.push("/");
-    } catch (error) {
-      console.error("Logout failed:", error);
-      localStorage.removeItem("access_token");
-      addNotification("warning", "Đăng xuất", "Đã đăng xuất (có lỗi hệ thống nhẹ)");
-      router.push("/");
-    }
+    await logout();
   };
 
   return (

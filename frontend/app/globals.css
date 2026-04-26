@@ -103,11 +103,12 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground font-sans antialiased;
-    font-feature-settings: "cv11", "ss01";
+    @apply antialiased text-slate-900;
+    text-rendering: optimizeLegibility;
   }
-  h1, h2, h3, h4, h5, h6 {
-    @apply font-heading tracking-tight;
+  
+  h1, h2, h3, h4 {
+    @apply tracking-tight font-heading;
   }
 }
 

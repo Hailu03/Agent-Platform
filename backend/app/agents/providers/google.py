@@ -17,3 +17,8 @@ class GoogleProvider(BaseLLMProvider):
     async def astream(self, messages: Any, **kwargs: Any) -> AsyncIterator[str]:
         async for chunk in self.client.astream(messages, **kwargs):
             yield chunk.content
+
+    def bind_tools(self, tools: list) -> "GoogleProvider":
+        if hasattr(self.client, "bind_tools"):
+            self.client = self.client.bind_tools(tools)
+        return self

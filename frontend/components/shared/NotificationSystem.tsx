@@ -5,16 +5,7 @@ import { Bell, X, Info, AlertTriangle, CheckCircle, AlertCircle } from "lucide-r
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 
-export type NotificationType = "info" | "success" | "warning" | "error";
-
-export interface Notification {
-  id: string;
-  type: NotificationType;
-  title: string;
-  message: string;
-  timestamp: Date;
-  read: boolean;
-}
+import { Notification, NotificationType } from "@/hooks/use-notifications";
 
 interface NotificationContextType {
   notifications: Notification[];
@@ -23,7 +14,7 @@ interface NotificationContextType {
   clearAll: () => void;
 }
 
-const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
+export const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -120,10 +111,3 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   );
 }
 
-export function useNotifications() {
-  const context = useContext(NotificationContext);
-  if (!context) {
-    throw new Error("useNotifications must be used within a NotificationProvider");
-  }
-  return context;
-}

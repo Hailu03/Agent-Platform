@@ -14,6 +14,7 @@ import os
 
 from app.repositories.agent_repo import AgentRepository
 from app.services.agent_service import AgentService
+from app.agents.tools.registry import get_available_tools
 
 router = APIRouter(prefix="/agents", tags=["Agents"])
 
@@ -77,3 +78,10 @@ async def upload_knowledge_file(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi tải file: {str(e)}")
+
+@router.get("/tools/available")
+async def list_available_tools(current_user: User = Depends(get_current_user)):
+    """
+    Trả về danh sách các công cụ (tools) mà hệ thống hỗ trợ.
+    """
+    return get_available_tools()
