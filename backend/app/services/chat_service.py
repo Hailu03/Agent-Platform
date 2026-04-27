@@ -1,10 +1,16 @@
 import json
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
-from app.repositories.agent_repo import AgentRepository
-from app.agents.graph import create_chat_graph
-from typing import AsyncGenerator
+from app.core.redis import redis_cache
+from app.core.config import settings
 from app.core.logging import get_logger
+from app.agents.graph import create_chat_graph
+from app.agents.factory import get_embeddings
+from app.agents.states.agent_state import Context
+from app.repositories.agent_repo import AgentRepository
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.store.postgres.aio import AsyncPostgresStore
+from psycopg_pool import AsyncConnectionPool
 
 logger = get_logger(__name__)
 
@@ -17,9 +23,6 @@ class ChatService:
     @classmethod
     async def get_pool(cls):
         if cls._pool is None:
-            from psycopg_pool import AsyncConnectionPool
-            from app.core.config import settings
-            
             logger.info("🗄️ Đang kết nối tới Postgres Pool...")
             # Chuyển đổi định dạng URL của SQLAlchemy sang định dạng chuẩn cho psycopg
             db_url = settings.DATABASE_URL.replace("+asyncpg", "")
@@ -63,8 +66,6 @@ class ChatService:
                 import psycopg
                 psycopg_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
                 async with await psycopg.AsyncConnection.connect(psycopg_url, autocommit=True) as conn:
-                    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-                    from langgraph.store.postgres.aio import AsyncPostgresStore
                     await AsyncPostgresSaver(conn).setup()
                     await AsyncPostgresStore(conn).setup()
                 logger.info("✅ Khởi tạo xong.")
@@ -76,7 +77,6 @@ class ChatService:
             raise HTTPException(status_code=404, detail="Agent not found")
 
         # 1. Kiểm tra Cache trước (Kèm user_id và agent_db)
-        from app.core.redis import redis_cache
         cached_res = redis_cache.get_chat_cache(agent_id, user_id, message, agent_db=agent_db)
         if cached_res:
             return cached_res
@@ -100,10 +100,6 @@ class ChatService:
         """
         API chính để chat với luồng dữ liệu đổ về liên tục (SSE) + Redis Cache + Redis Checkpointer
         """
-        from app.core.redis import redis_cache
-        from langgraph.checkpoint.redis import AsyncRedisSaver
-        from app.core.config import settings
-        
         # --- LẤY THÔNG TIN AGENT TRƯỚC ĐỂ CÓ API KEY ---
         agent_db = await self.agent_repo.get_by_id(agent_id, user_id)
         if not agent_db:
@@ -126,15 +122,11 @@ class ChatService:
             agent_config = self._get_agent_config(agent_db)
             
             # Khởi tạo Postgres Checkpointer (Lưu vào DB lâu dài)
-            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-            from langgraph.store.postgres.aio import AsyncPostgresStore
-            
             pool = await self.get_pool()
             checkpointer = AsyncPostgresSaver(pool)
             
             # Hàm custom embed dùng cấu hình của Agent
             async def custom_embed(texts: list[str]) -> list[list[float]]:
-                from app.agents.factory import get_embeddings
                 emb = get_embeddings(
                     provider=agent_db.embedding_provider,
                     model=agent_db.embedding_model,
@@ -142,10 +134,21 @@ class ChatService:
                 )
                 return await emb.aembed_documents(texts)
                 
-            # Lấy số chiều thực tế của model bằng cách embed thử một chuỗi
-            sample_emb = await custom_embed(["test"])
-            actual_dims = len(sample_emb[0])
-            logger.info(f"🔍 Detected embedding dimensions: {actual_dims} for model {agent_db.embedding_model}")
+            # Tối ưu: Lấy số chiều từ Cache theo Provider + Model
+            cache_key_dims = f"emb_dims:{agent_db.embedding_provider}:{agent_db.embedding_model}"
+            cached_dims = redis_cache.redis.get(cache_key_dims)
+            
+            if cached_dims:
+                actual_dims = int(cached_dims)
+                logger.info(f"🚀 Reused embedding dimensions from cache: {actual_dims} for {agent_db.embedding_provider}/{agent_db.embedding_model}")
+            else:
+                # Nếu chưa có trong cache, mới thực hiện embed thử 1 lần
+                logger.info(f"🔍 Detecting embedding dimensions for {agent_db.embedding_model}...")
+                sample_emb = await custom_embed(["test"])
+                actual_dims = len(sample_emb[0])
+                # Lưu vào cache 24h (86400s)
+                redis_cache.redis.set(cache_key_dims, actual_dims, ex=86400)
+                logger.info(f"💾 Cached embedding dimensions: {actual_dims} for {agent_db.embedding_model}")
 
             store = AsyncPostgresStore(
                 pool,
@@ -166,7 +169,6 @@ class ChatService:
             full_thinking = ""
 
             try:
-                from app.agents.states.agent_state import Context
                 context_obj = Context(user_id=user_id, agent_id=agent_id)
                 
                 async for event in graph.astream_events(

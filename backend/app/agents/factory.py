@@ -33,4 +33,4 @@ def get_embeddings(provider: str, model: str, api_key: str = None):
     
     # Mặc định dùng Google (vì bạn đang dùng nó nhiều)
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
-    return GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
+    return GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=api_key)
