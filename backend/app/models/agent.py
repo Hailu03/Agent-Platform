@@ -17,6 +17,11 @@ class Agent(Base):
     api_key = Column(String, nullable=True) # Optional: Direct API key (will be encrypted later)
     api_key_id = Column(String, nullable=True) # Reference to stored credentials
     
+    # Embedding Configuration
+    embedding_provider = Column(String, default="google") # openai, google, ollama
+    embedding_model = Column(String, default="models/embedding-001")
+    embedding_api_key = Column(String, nullable=True)
+    
     # Core Logic
     instructions = Column(Text, nullable=True)
     

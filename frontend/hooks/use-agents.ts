@@ -11,9 +11,9 @@ export interface Agent {
   model_provider: string;
   model_name: string;
   is_active: boolean;
-  knowledge_files?: string[];
-  skills?: string[];
-  tools?: string[];
+  knowledge_files?: any[];
+  skills?: any[];
+  tools?: any[];
 }
 
 export function useAgents() {

@@ -27,27 +27,46 @@ class BaseWAOAgent(ABC):
         
         # Khởi tạo tools
         self.tool_names = agent_config.get("tools", [])
-        self.tools = get_tools_by_names(self.tool_names)
+        self.tools = get_tools_by_names(self.tool_names, self.config)
         self.tools_map = {tool.name: tool for tool in self.tools}
         
-        logger.info(f"🛠️ Đã nạp {len(self.tools)} công cụ: {[t.name for t in self.tools]}")
-        
-        # Bind tools nếu có (Giấu web_reader khỏi LLM để LangGraph điều phối ngầm)
+        # Bind tools nếu có
         if self.tools:
-            # Chỉ cho LLM thấy các công cụ công khai, giấu các công cụ phục vụ flow ngầm
-            public_tools = [t for t in self.tools if t.name != "web_reader"]
+            # Chỉ cho LLM thấy các công cụ "mặt tiền"
+            internal_tool_names = ["web_reader", "pdf_reader"]
+            public_tools = [t for t in self.tools if t.name not in internal_tool_names]
+            
+            # Cập nhật mô tả tool GraphRAG dựa trên file thực tế
+            knowledge_files = agent_config.get("knowledge_files", [])
+            if knowledge_files:
+                kb_names = []
+                for f in knowledge_files:
+                    if isinstance(f, dict):
+                        # Ưu tiên lấy 'name' hoặc 'filename'
+                        fname = f.get("name") or f.get("filename") or str(f)
+                        kb_names.append(fname)
+                    else:
+                        kb_names.append(str(f))
+                
+                kb_list_str = ", ".join(kb_names)
+                for tool in self.tools:
+                    if tool.name == "graph_rag_search":
+                        tool.description = f"BẮT BUỘC DÙNG ĐẦU TIÊN để tra cứu thông tin trong các tài liệu: [{kb_list_str}]. Chỉ dùng công cụ khác nếu không tìm thấy ở đây."
+            
             if public_tools:
-                logger.info(f"🔗 Đang thực hiện gán (binding) {len(public_tools)} công cụ công khai vào Model...")
+                logger.info(f"🔗 Đang thực hiện gán (binding) {len(public_tools)} công cụ công khai vào Model: {[t.name for t in public_tools]}")
                 self.llm = self.llm.bind_tools(public_tools)
             else:
                 logger.info("ℹ️ Không có công cụ công khai nào để gán vào Model.")
-        
+
         # Tạo prompt tổng hợp từ cấu hình (gọi sau khi đã nạp tools)
         self.system_prompt = self._build_system_prompt()
         
-        # Xây dựng và biên dịch Graph
+        # Xây dựng và biên dịch Graph (Hỗ trợ Checkpointer để lưu trạng thái phiên chat)
         self.workflow = self._create_workflow()
-        self.app = self.workflow.compile()
+        checkpointer = agent_config.get("checkpointer")
+        store = agent_config.get("store")
+        self.app = self.workflow.compile(checkpointer=checkpointer, store=store)
 
     def _build_system_prompt(self) -> str:
         """
@@ -58,25 +77,46 @@ class BaseWAOAgent(ABC):
         description = self.config.get("description", "Không có mô tả")
         instructions = self.config.get("instructions", "")
 
-        # Tạo danh sách công cụ để đưa vào prompt
+        # Chỉ cho LLM thấy các công cụ "mặt tiền"
+        internal_tool_names = ["web_reader", "pdf_reader"]
+        public_tools = [t for t in self.tools if t.name not in internal_tool_names]
+        
         tools_description = ""
-        if self.tools:
+        if public_tools:
             tools_description = "DANH SÁCH CÔNG CỤ BẠN ĐANG CÓ:\n"
-            for tool in self.tools:
+            for tool in public_tools:
                 tools_description += f"- {tool.name}: {tool.description}\n"
         else:
             tools_description = "Bạn hiện không có công cụ bổ sung nào."
 
+        # Tạo danh sách file kiến thức (nếu có)
+        knowledge_files = self.config.get("knowledge_files", [])
+        kb_info = ""
+        if knowledge_files:
+            kb_info = "📚 DANH SÁCH TÀI LIỆU NỘI BỘ (KHO TRI THỨC):\n"
+            for f in knowledge_files:
+                # Xử lý nếu f là dict (có trường 'name' hoặc 'filename')
+                if isinstance(f, dict):
+                    fname = f.get("name") or f.get("filename") or str(f)
+                else:
+                    fname = str(f)
+                kb_info += f"- {fname}\n"
+            kb_info += "\n"
+        else:
+            kb_info = "⚠️ LƯU Ý: Hiện tại KHÔNG có tài liệu nội bộ nào được nạp.\n\n"
+
         template = (
             "BẠN LÀ {name}.\n"
             "Chuyên môn: {specialty}\n"
-            "Vai trò & Nhiệm vụ: {description}\n\n"
+            "Vai trò: {description}\n\n"
             "THỜI GIAN HIỆN TẠI: {current_time}\n\n"
-            "--- CHỈ DẪN HỆ THỐNG QUAN TRỌNG ---\n"
-            "1. Bạn có quyền truy cập vào các CÔNG CỤ sau đây:\n"
-            "{tools_list}\n"
-            "2. Khi nhận được câu hỏi về THÔNG TIN HIỆN TẠI, THỜI SỰ, GIÁ CẢ hoặc thông tin mới nhất, bạn BẮT BUỘC phải gọi công cụ tương ứng (ví dụ: 'web_search') để tra cứu.\n"
-            "3. Luôn ưu tiên thông tin thực tế từ kết quả công cụ trả về.\n\n"
+            "{kb_info}"
+            "--- QUY TẮC TRA CỨU TỐI THƯỢNG ---\n"
+            "1. Nếu câu hỏi liên quan đến nội dung trong danh sách TÀI LIỆU NỘI BỘ bên trên, bạn **BẮT BUỘC** phải gọi công cụ 'graph_rag_search' ngay lập tức.\n"
+            "2. KHÔNG ĐƯỢC tự trả lời bằng kiến thức cũ nếu thông tin đó có thể nằm trong tài liệu.\n"
+            "3. Chỉ sử dụng 'web_search' sau khi đã tra cứu GraphRAG mà không có kết quả.\n\n"
+            "CÔNG CỤ CỦA BẠN:\n"
+            "{tools_list}\n\n"
             "{instructions}"
         )
         
@@ -86,6 +126,7 @@ class BaseWAOAgent(ABC):
             description=description,
             current_time=datetime.now().strftime("%A, %d/%m/%Y %H:%M:%S"),
             tools_list=tools_description,
+            kb_info=kb_info,
             instructions=instructions
         )
         

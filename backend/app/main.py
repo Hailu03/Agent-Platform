@@ -26,7 +26,7 @@ app = FastAPI(
 # Auth Router
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(agent.router, prefix="/api/v1")
-app.include_router(chat.router, prefix="/api/v1")
+app.include_router(chat.router, prefix="/api/v1/chat")
 
 # CORS configuration
 app.add_middleware(

@@ -16,6 +16,10 @@ from app.repositories.agent_repo import AgentRepository
 from app.services.agent_service import AgentService
 from app.agents.tools.registry import get_available_tools
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/agents", tags=["Agents"])
 
 def get_agent_service(db: AsyncSession = Depends(get_db)) -> AgentService:
@@ -59,25 +63,29 @@ async def update_agent(
     if not agent:
         raise HTTPException(status_code=404, detail="Không tìm thấy Agent")
     return agent
+    
 @router.post("/upload")
 async def upload_knowledge_file(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user)
 ):
     try:
-        content = await file.read()
-        file_ext = os.path.splitext(file.filename)[1]
+        content_bytes = await file.read()
+        file_ext = os.path.splitext(file.filename)[1].lower()
         object_name = f"{current_user.id}/{uuid.uuid4()}{file_ext}"
         
-        file_url = storage_service.upload_file(content, object_name)
+        # 1. Lưu file lên MinIO như cũ
+        file_url = storage_service.upload_file(content_bytes, object_name)
         
+        # 2. Trả về thông tin file để Frontend lưu vào danh sách knowledge_files của Agent
         return {
             "filename": file.filename,
             "object_name": object_name,
             "url": file_url
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi tải file: {str(e)}")
+        logger.error(f"❌ Lỗi khi tải file lên: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Lỗi hệ thống: {str(e)}")
 
 @router.get("/tools/available")
 async def list_available_tools(current_user: User = Depends(get_current_user)):

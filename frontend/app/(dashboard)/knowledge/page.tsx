@@ -40,14 +40,19 @@ export default function KnowledgePage() {
   const items: KnowledgeItem[] = [];
   agents.forEach(agent => {
     if (agent.knowledge_files) {
-      agent.knowledge_files.forEach((file: string) => {
+      agent.knowledge_files.forEach((file: any) => {
+        const isString = typeof file === "string";
+        const fileName = isString ? (file.split("/").pop() || file) : (file.filename || file.object_name);
+        const objectName = isString ? file : (file.object_name || file.filename);
+        const fileType = fileName.split(".").pop()?.toUpperCase() || "FILE";
+
         items.push({
-          id: `${agent.id}-${file}`,
-          fileName: file.split("/").pop() || file,
-          objectName: file,
+          id: `${agent.id}-${objectName}`,
+          fileName: fileName,
+          objectName: objectName,
           agentId: agent.id,
           agentName: agent.name,
-          fileType: file.split(".").pop()?.toUpperCase() || "FILE"
+          fileType: fileType
         });
       });
     }

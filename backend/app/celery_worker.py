@@ -1,5 +1,12 @@
 from celery import Celery
 from app.core.config import settings
+from app.core.logging import setup_logging
+from celery.signals import worker_process_init
+
+@worker_process_init.connect
+def configure_workers(sender=None, **kwargs):
+    setup_logging()
+    print("✅ Celery worker logging initialized.")
 
 celery_app = Celery(
     "wao_worker",
@@ -16,6 +23,4 @@ celery_app.conf.update(
 )
 
 # Import tasks explicitly so Celery can discover them
-# import app.tasks.embedding
-# import app.tasks.agent_run
-# import app.tasks.indexing
+import app.tasks.graph_rag

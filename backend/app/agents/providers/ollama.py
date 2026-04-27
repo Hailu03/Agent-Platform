@@ -4,11 +4,12 @@ from app.core.config import settings
 from typing import Any, AsyncIterator
 
 class OllamaProvider(BaseLLMProvider):
-    def __init__(self, model_name: str, temperature: float = 0.7):
+    def __init__(self, model_name: str, temperature: float = 0.7, streaming: bool = True):
         self.client = ChatOllama(
             model=model_name,
             base_url=settings.OLLAMA_URL,
-            temperature=temperature
+            temperature=temperature,
+            streaming=streaming
         )
 
     async def ainvoke(self, messages: Any, **kwargs: Any) -> Any:

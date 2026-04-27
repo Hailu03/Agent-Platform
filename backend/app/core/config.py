@@ -16,9 +16,6 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""
 
-    OPENAI_API_KEY: str = ""
-    ANTHROPIC_API_KEY: str = ""
-    GOOGLE_API_KEY: str = ""
     OLLAMA_URL: str = "http://localhost:11434"
 
     LANGFUSE_HOST: str = "http://localhost:3001"

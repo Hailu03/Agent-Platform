@@ -1,15 +1,14 @@
-from app.agents.implementations.chat import StandardChatAgent
-from app.agents.implementations.tool_chat import ToolChatAgent
+from app.agents.graphs.chat import WAOChatAgent
 
-def create_chat_graph(agent_config: dict):
+def create_chat_graph(agent_config: dict, checkpointer=None, store=None):
     """
     Factory function để tạo Graph phù hợp. 
-    Sau này có thể thêm logic để chọn loại Agent (Chat, Tool, RAG, etc.)
-    dựa vào agent_config.
+    Sử dụng WAOChatAgent thống nhất cho cả trường hợp có hoặc không có công cụ.
     """
-    # Nếu agent có bật công cụ, sử dụng ToolChatAgent
-    if agent_config.get("tools"):
-        return ToolChatAgent(agent_config).app
-    
-    agent = StandardChatAgent(agent_config)
+    if checkpointer:
+        agent_config["checkpointer"] = checkpointer
+    if store:
+        agent_config["store"] = store
+        
+    agent = WAOChatAgent(agent_config)
     return agent.app

@@ -1,0 +1,161 @@
+# SearXNG Settings Nâng Cao cho WAO AI Agent Platform
+use_default_settings: true
+
+server:
+  port: 8080
+  bind_address: "0.0.0.0"
+  secret_key: "wao_ai_agent_platform_secret_key_2026_advanced"
+  limiter: false # Để false trong quá trình dev/test Agent. Bật True khi deploy public.
+  image_proxy: true
+  public_instance: false # Đảm bảo chỉ Agent nội bộ dùng, không bị người ngoài quét ra
+  method: "GET" # "GET" thân thiện với cache, "POST" bảo mật hơn nhưng khó debug
+
+search:
+  safe_search: 0
+  autocomplete: "google"
+  formats:
+    - html
+    - json
+  default_lang: "vi-VN" # Ưu tiên ngữ cảnh Việt Nam
+  languages:
+    - "en-US"
+    - "vi-VN"
+  ban_time_on_fail: 5 # Tạm khóa engine trong 5s nếu lỗi thay vì văng exception
+
+ui:
+  theme: simple
+  center_alignment: true
+
+# Tùy chọn Proxy nếu bạn bị Google chặn IP (Bỏ comment khi cần)
+# outgoing:
+#   proxies:
+#     http:
+#       - http://user:pass@proxy.example.com:3128
+#     https:
+#       - http://user:pass@proxy.example.com:3128
+
+engines:
+  # ==========================================
+  # 1. NHÓM TÌM KIẾM TỔNG HỢP (GENERAL)
+  # Trọng số (weight) cao cho các engine uy tín
+  # ==========================================
+  - name: google
+    engine: google
+    shortcut: g
+    timeout: 3.5
+    weight: 2.0 # Ưu tiên kết quả từ Google
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    timeout: 3.0
+    weight: 1.5
+
+  - name: bing
+    engine: bing
+    shortcut: b
+    timeout: 3.0
+    weight: 1.5
+
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: w
+    timeout: 2.5
+    weight: 2.0
+    disabled: false # Mở lại để lấy fact-check chuẩn xác
+
+  # ==========================================
+  # 2. NHÓM TIN TỨC & SỰ KIỆN (NEWS)
+  # Giúp Agent nắm bắt dòng thời sự (Real-time)
+  # ==========================================
+  - name: google news
+    engine: google_news
+    shortcut: gn
+    timeout: 3.0
+    categories: news
+
+  - name: bing news
+    engine: bing_news
+    shortcut: bn
+    timeout: 3.0
+    categories: news
+
+  # ==========================================
+  # 3. NHÓM KHOA HỌC & HỌC THUẬT (SCIENCE)
+  # Giúp Agent trả lời các câu hỏi chuyên môn sâu, nghiên cứu
+  # ==========================================
+  - name: arxiv
+    engine: arxiv
+    shortcut: arx
+    timeout: 4.0
+    categories: science
+
+  - name: google scholar
+    engine: google_scholar
+    shortcut: gs
+    timeout: 4.0
+    categories: science
+
+  - name: pubmed
+    engine: pubmed
+    shortcut: pm
+    timeout: 4.0
+    categories: science
+
+  # ==========================================
+  # 4. NHÓM IT & LẬP TRÌNH (IT / DEV)
+  # Đặc biệt quan trọng nếu Agent của bạn biết code
+  # ==========================================
+  - name: github
+    engine: github
+    shortcut: gh
+    timeout: 4.0
+    categories: it
+
+  - name: pypi
+    engine: pypi
+    shortcut: py
+    timeout: 3.0
+    categories: it
+
+  # ==========================================
+  # 5. TẮT CÁC ENGINE DỄ GÂY LỖI / CHẬM
+  # ==========================================
+  - name: yandex
+    engine: yandex
+    disabled: true # Chặn IP gắt, thường xuyên bắt giải captcha
+
+  # ==========================================
+  # 6. NHÓM HÌNH ẢNH (IMAGES)
+  # ==========================================
+  - name: google images
+    engine: google_images
+    shortcut: gi
+    timeout: 3.0
+    categories: images
+
+  - name: bing images
+    engine: bing_images
+    shortcut: bi
+    timeout: 3.0
+    categories: images
+
+  # ==========================================
+  # 7. NHÓM TÀI LIỆU CỤ THỂ (FILES)
+  # ==========================================
+  # Công cụ này lùng sục trực tiếp các file PDF, DOCX, PPT
+  - name: google pdf
+    engine: google
+    shortcut: pdf
+    categories: files
+    args:
+      filetype: pdf # Ép Google chỉ tìm file PDF
+
+  # ==========================================
+  # 8. NHÓM MẠNG XÃ HỘI (SOCIAL MEDIA)
+  # ==========================================
+  - name: reddit
+    engine: reddit
+    shortcut: rd
+    timeout: 3.0
+    categories: social media

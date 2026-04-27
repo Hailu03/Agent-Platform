@@ -53,10 +53,12 @@ export function Sidebar() {
     const items: SubItem[] = [];
     agents.forEach(agent => {
       if (type === "knowledge" && agent.knowledge_files) {
-        agent.knowledge_files.forEach((file: string) => {
+        agent.knowledge_files.forEach((file: any) => {
+          const fileName = typeof file === "string" ? (file.split("/").pop() || file) : (file.filename || file.object_name);
+          const fileId = typeof file === "string" ? file : (file.object_name || file.filename);
           items.push({ 
-            id: `${agent.id}-${file}`, 
-            name: file.split("/").pop() || file, 
+            id: `${agent.id}-${fileId}`, 
+            name: fileName, 
             agentName: agent.name,
             href: `/knowledge/${agent.id}`
           });

@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: wao_postgres
     restart: always
     environment:
@@ -22,27 +22,6 @@ services:
       - "6379:6379"
     volumes:
       - wao_redis_data:/data
-
-  neo4j:
-    image: neo4j:5-community
-    container_name: wao_neo4j
-    restart: always
-    environment:
-      NEO4J_AUTH: neo4j/waoai_password
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    volumes:
-      - wao_neo4j_data:/data
-
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: wao_qdrant
-    restart: always
-    ports:
-      - "6333:6333"
-    volumes:
-      - wao_qdrant_data:/qdrant/storage
 
   minio:
     image: minio/minio:latest
@@ -66,10 +45,85 @@ services:
     ports:
       - "8081:8080"
     volumes:
-      - ./connectors/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./backend/external/searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
       - SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
     restart: always
+
+  neo4j:
+    image: neo4j:latest
+    container_name: wao-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/waoplatform
+      - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      - wao_neo4j_data:/data
+    restart: always
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: wao-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - wao_qdrant_data:/qdrant/storage
+    restart: always
+
+  worker:
+    build: ./backend
+    container_name: wao_worker
+    restart: always
+    volumes:
+      - ./backend:/app
+    command: celery -A app.celery_worker worker --loglevel=info --concurrency=5 --uid=nobody
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/waoai
+      - REDIS_URL=redis://redis:6379/0
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=waoplatform
+      - QDRANT_URL=http://qdrant:6333
+      - MINIO_ENDPOINT=minio:9000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    depends_on:
+      - redis
+      - minio
+      - neo4j
+      - qdrant
+      - postgres
+
+
+  # backend:
+  #   build: ./backend
+  #   container_name: wao_backend
+  #   restart: always
+  #   volumes:
+  #     - ./backend:/app
+  #   environment:
+  #     - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/waoai
+  #     - REDIS_URL=redis://redis:6379/0
+  #     - NEO4J_URI=bolt://neo4j:7687
+  #     - NEO4J_USER=neo4j
+  #     - NEO4J_PASSWORD=waoplatform
+  #     - QDRANT_URL=http://qdrant:6333
+  #     - MINIO_ENDPOINT=minio:9000
+  #     - SEARXNG_URL=http://searxng:8080
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+  #     - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #     - minio
+  #     - neo4j
+  #     - qdrant
 
 volumes:
   wao_postgres_data:

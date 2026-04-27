@@ -4,11 +4,12 @@ from app.core.config import settings
 from typing import Any, AsyncIterator
 
 class AnthropicProvider(BaseLLMProvider):
-    def __init__(self, model_name: str, temperature: float = 0.7, api_key: str = None):
+    def __init__(self, model_name: str, temperature: float = 0.7, api_key: str = None, streaming: bool = True):
         self.client = ChatAnthropic(
             model=model_name,
             temperature=temperature,
-            anthropic_api_key=api_key or settings.ANTHROPIC_API_KEY
+            anthropic_api_key=api_key or settings.ANTHROPIC_API_KEY,
+            streaming=streaming
         )
 
     async def ainvoke(self, messages: Any, **kwargs: Any) -> Any:

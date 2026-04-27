@@ -8,7 +8,11 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 class SearchInput(BaseModel):
-    query: str = Field(description="The search query to look up on the internet")
+    query: str = Field(description="Từ khóa tìm kiếm (Ví dụ: 'Tin tức Trung Đông', 'Attention is all you need paper')")
+    category: str = Field(
+        default="general",
+        description="Chọn 1 chủ đề: 'general' (Tổng hợp), 'news' (Tin tức), 'science' (Khoa học/Học thuật), 'it' (Công nghệ/Lập trình), 'files' (Tìm file PDF/DOCX)."
+    )
 
 class SearxngSearchTool(BaseTool):
     name: str = "web_search"
@@ -22,19 +26,20 @@ class SearxngSearchTool(BaseTool):
         import asyncio
         return asyncio.run(self._arun(query))
 
-    async def _arun(self, query: str) -> str:
+    async def _arun(self, query: str, category: str = "general") -> str:
         """Use the tool asynchronously."""
         from app.core.config import settings
         searxng_url = settings.SEARXNG_URL
         
-        logger.info(f"🔍 Đang tìm kiếm thông tin cho: '{query}'")
+        logger.info(f"🔍 Đang tìm kiếm [{category.upper()}]: '{query}'")
         
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 params = {
                     "q": query,
                     "format": "json",
-                    "language": "vi-VN"
+                    "language": "vi-VN",
+                    "categories": category
                 }
                 response = await client.get(f"{searxng_url}/search", params=params)
                 response.raise_for_status()

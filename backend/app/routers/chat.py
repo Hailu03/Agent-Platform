@@ -11,8 +11,11 @@ from typing import List, Dict, Any
 
 from app.repositories.agent_repo import AgentRepository
 from app.services.chat_service import ChatService
+from app.core.logging import get_logger
 
-router = APIRouter(prefix="/chat", tags=["Chat"])
+logger = get_logger(__name__)
+
+router = APIRouter(tags=["Chat"], redirect_slashes=False)
 
 def get_chat_service(db: AsyncSession = Depends(get_db)) -> ChatService:
     repo = AgentRepository(db)
@@ -29,6 +32,7 @@ async def chat(
     service: ChatService = Depends(get_chat_service),
     current_user: User = Depends(get_current_user)
 ):
+    logger.info(f"💬 Nhận yêu cầu chat (Sync) từ User {current_user.id} cho Agent {request.agent_id}")
     return await service.process_chat(
         request.agent_id, 
         current_user.id, 
@@ -44,6 +48,7 @@ async def chat_stream(
     """
     Endpoint chính để chat stream (SSE)
     """
+    logger.info(f"🌊 Nhận yêu cầu chat (Stream) từ User {current_user.id} cho Agent {request.agent_id}")
     return await service.stream_chat(
         request.agent_id,
         current_user.id,

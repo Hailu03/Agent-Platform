@@ -36,6 +36,22 @@ class StorageService:
             logger.error(f"Error uploading file to MinIO: {e}")
             raise e
 
+    def get_file(self, file_path_or_url: str) -> bytes:
+        """
+        Tải nội dung file từ MinIO. Hỗ trợ cả object_name hoặc full URL.
+        """
+        try:
+            # Nếu là URL (chứa /bucket_name/), bóc tách lấy object_name
+            object_name = file_path_or_url
+            if f"/{self.bucket_name}/" in file_path_or_url:
+                object_name = file_path_or_url.split(f"/{self.bucket_name}/")[1]
+            
+            response = self.s3.get_object(Bucket=self.bucket_name, Key=object_name)
+            return response['Body'].read()
+        except Exception as e:
+            logger.error(f"Error getting file from MinIO: {e}")
+            raise e
+
     def get_presigned_url(self, object_name, expires_in=3600):
         try:
             url = self.s3.generate_presigned_url(
