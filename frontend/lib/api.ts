@@ -8,7 +8,19 @@ interface FetchOptions extends RequestInit {
   headers?: Record<string, string>;
 }
 
-export async function fetchWithAuth(endpoint: string, options: FetchOptions = {}) {
+let isRefreshing = false;
+let refreshSubscribers: ((token: string) => void)[] = [];
+
+function subscribeTokenRefresh(cb: (token: string) => void) {
+  refreshSubscribers.push(cb);
+}
+
+function onRrefreshed(token: string) {
+  refreshSubscribers.map((cb) => cb(token));
+  refreshSubscribers = [];
+}
+
+export async function fetchWithAuth(endpoint: string, options: FetchOptions = {}): Promise<Response> {
   let token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
   
   const headers = {
@@ -22,10 +34,23 @@ export async function fetchWithAuth(endpoint: string, options: FetchOptions = {}
 
   // Handle 401 Unauthorized - Attempt Token Refresh
   if (response.status === 401 && typeof window !== "undefined") {
+    // If we're already refreshing, wait for it to complete
+    if (isRefreshing) {
+      return new Promise<Response>((resolve) => {
+        subscribeTokenRefresh((newToken) => {
+          const newHeaders = {
+            ...options.headers,
+            Authorization: `Bearer ${newToken}`,
+          };
+          resolve(fetch(url, { ...options, headers: newHeaders, credentials: "include" }));
+        });
+      });
+    }
+
+    isRefreshing = true;
     console.log("Token expired, attempting refresh...");
     
     try {
-      // Call the refresh endpoint (which uses the HttpOnly refresh_token cookie)
       const refreshRes = await fetch(`${API_URL}/auth/refresh`, {
         method: "POST",
         headers: {
@@ -39,8 +64,9 @@ export async function fetchWithAuth(endpoint: string, options: FetchOptions = {}
         const newToken = data.access_token;
         
         localStorage.setItem("access_token", newToken);
+        isRefreshing = false;
+        onRrefreshed(newToken);
         
-        // Retry the original request with the new token
         const newHeaders = {
           ...options.headers,
           Authorization: `Bearer ${newToken}`,
@@ -48,13 +74,17 @@ export async function fetchWithAuth(endpoint: string, options: FetchOptions = {}
         
         return await fetch(url, { ...options, headers: newHeaders, credentials: "include" });
       } else {
-        // Refresh failed, clear token and redirect
+        isRefreshing = false;
         console.error("Refresh failed, logging out...");
         localStorage.removeItem("access_token");
-        // We don't necessarily want to force a reload here, 
-        // the caller can handle the 401
+        
+        // If we're on a page that requires auth, redirect to login
+        if (window.location.pathname !== "/" && window.location.pathname !== "/login") {
+          window.location.href = "/?session_expired=true";
+        }
       }
     } catch (error) {
+      isRefreshing = false;
       console.error("Error during token refresh:", error);
     }
   }

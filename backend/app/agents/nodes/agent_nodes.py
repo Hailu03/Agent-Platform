@@ -32,10 +32,18 @@ async def chat_agent_node(state: AgentState, config: RunnableConfig, agent_insta
 
     # 2. Xây dựng prompt
     thinking_instruction = (
-        "\n\n[QUY TẮC BẮT BUỘC]: Trước khi trả lời, bạn PHẢI trình bày các bước lập luận, "
-        "phân tích dữ liệu hoặc lập kế hoạch bên trong thẻ <thinking>...</thinking>. "
-        "Sau đó mới đưa ra câu trả lời cuối cùng cho người dùng."
+        "\n\n[QUY TẮC LẬP LUẬN]:\n"
+        "1. Nếu bạn cần sử dụng CÔNG CỤ, hãy thực hiện GỌI CÔNG CỤ ngay lập tức mà không cần giải thích thêm.\n"
+        "2. Nếu bạn trả lời trực tiếp cho người dùng, bạn PHẢI trình bày các bước lập luận bên trong thẻ <thinking>...</thinking> trước khi đưa ra câu trả lời cuối cùng."
     )
+    
+    # Đối với các model Google (Gemini/Gemma), đôi khi thẻ thinking làm hỏng cấu trúc Function Call
+    if agent_instance.provider == "google":
+        thinking_instruction = (
+            "\n\n[IMPORTANT]: If you decide to use a tool, ONLY output the tool call. "
+            "Do NOT wrap it in any XML tags or add thinking text. "
+            "Thinking is only required for direct text responses."
+        )
     system_message = SystemMessage(content=agent_instance.system_prompt + memory_context + thinking_instruction)
     
     # 3. Gọi LLM

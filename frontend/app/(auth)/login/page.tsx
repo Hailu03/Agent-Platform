@@ -20,23 +20,14 @@ export default function LoginPage() {
   const router = useRouter();
 
   const login = useGoogleLogin({
-    onSuccess: async (tokenResponse) => {
+    flow: "auth-code",
+    scope: "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
+    onSuccess: async (codeResponse) => {
       try {
-        // Trong thực tế, Google trả về access_token, 
-        // nhưng backend của chúng ta đang đợi id_token (nếu dùng implicit flow).
-        // Tuy nhiên, để đơn giản và bảo mật hơn, ta có thể fetch user info từ google 
-        // hoặc dùng Google One Tap để lấy ID Token.
-        // Ở đây tôi sẽ giả định backend nhận access_token hoặc bạn dùng @react-oauth/google 
-        // để lấy auth code và trao đổi ở backend.
-        
-        // Để khớp với backend đã viết (đợi id_token), ta nên dùng ID Token.
-        // Nhưng @react-oauth/google useGoogleLogin mặc định trả về Access Token.
-        
-        // Sửa backend sau, giờ hãy gọi endpoint với token này:
         const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/google`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id_token: tokenResponse.access_token }), // Tạm dùng access_token làm id_token để test hoặc sửa backend
+          body: JSON.stringify({ code: codeResponse.code }), 
         });
 
         if (response.ok) {

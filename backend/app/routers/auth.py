@@ -10,12 +10,19 @@ from app.models.base import get_db
 from app.models.user import User
 from app.schemas.user import UserCreate, UserLogin, UserResponse, Token, GoogleLogin
 from app.core.security import create_access_token, create_refresh_token, verify_password, get_password_hash, get_current_user
+from fastapi.responses import RedirectResponse
+import urllib.parse
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
-    return current_user
+    user_data = UserResponse.model_validate(current_user)
+    user_data.is_google_connected = bool(current_user.google_refresh_token)
+    return user_data
 
 @router.post("/register", response_model=UserResponse)
 async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
@@ -85,35 +92,76 @@ async def google_auth(
     email = None
     full_name = None
     google_id = None
+    google_access_token = None
+    google_refresh_token = None
+    google_token_expiry = None
     
-    # Try verifying as ID Token (JWT) first
-    try:
-        id_info = id_token.verify_oauth2_token(
-            login_data.id_token, 
-            google_requests.Request(), 
-            settings.GOOGLE_CLIENT_ID
-        )
-        email = id_info.get("email")
-        full_name = id_info.get("name")
-        google_id = id_info.get("sub")
-    except Exception:
-        # If ID Token verification fails, try as Access Token via UserInfo API
-        import httpx
+    import httpx
+    
+    if login_data.code:
+        # 1. Trao đổi code lấy tokens (bao gồm cả refresh_token nếu scope đủ)
         async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                "https://www.googleapis.com/oauth2/v3/userinfo",
-                headers={"Authorization": f"Bearer {login_data.id_token}"}
+            token_resp = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": login_data.code,
+                    "client_id": settings.GOOGLE_CLIENT_ID,
+                    "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                    "redirect_uri": "postmessage", # Khi dùng @react-oauth/google code flow
+                    "grant_type": "authorization_code",
+                }
             )
-            if resp.status_code == 200:
-                user_data = resp.json()
-                email = user_data.get("email")
-                full_name = user_data.get("name")
-                google_id = user_data.get("sub")
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Mã xác thực Google không hợp lệ hoặc đã hết hạn."
+            
+            if token_resp.status_code == 200:
+                tokens = token_resp.json()
+                google_access_token = tokens.get("access_token")
+                google_refresh_token = tokens.get("refresh_token")
+                expires_in = tokens.get("expires_in", 3600)
+                from datetime import datetime, timedelta, timezone
+                google_token_expiry = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                
+                # 2. Lấy info user từ Google
+                info_resp = await client.get(
+                    "https://www.googleapis.com/oauth2/v3/userinfo",
+                    headers={"Authorization": f"Bearer {google_access_token}"}
                 )
+                if info_resp.status_code == 200:
+                    user_data = info_resp.json()
+                    email = user_data.get("email")
+                    full_name = user_data.get("name")
+                    google_id = user_data.get("sub")
+            else:
+                logger.error(f"Google Code Exchange Error: {token_resp.text}")
+                raise HTTPException(status_code=401, detail="Xác thực Google thất bại.")
+                
+    elif login_data.id_token:
+        # Try verifying as ID Token (JWT) first
+        try:
+            id_info = id_token.verify_oauth2_token(
+                login_data.id_token, 
+                google_requests.Request(), 
+                settings.GOOGLE_CLIENT_ID
+            )
+            email = id_info.get("email")
+            full_name = id_info.get("name")
+            google_id = id_info.get("sub")
+        except Exception:
+            # If ID Token verification fails, try as Access Token via UserInfo API
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://www.googleapis.com/oauth2/v3/userinfo",
+                    headers={"Authorization": f"Bearer {login_data.id_token}"}
+                )
+                if resp.status_code == 200:
+                    user_data = resp.json()
+                    email = user_data.get("email")
+                    full_name = user_data.get("name")
+                    google_id = user_data.get("sub")
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Mã xác thực Google không hợp lệ hoặc đã hết hạn."
+                    )
     
     if not email:
         raise HTTPException(
@@ -130,14 +178,25 @@ async def google_auth(
             id=str(uuid.uuid4()),
             email=email,
             full_name=full_name,
-            hashed_password=None, # Google users don't need a password
+            hashed_password=None,
             is_active=True,
             is_verified=True,
-            google_id=google_id # Store Google Subject ID
+            google_id=google_id,
+            google_access_token=google_access_token,
+            google_refresh_token=google_refresh_token,
+            google_token_expiry=google_token_expiry
         )
         db.add(user)
-        await db.commit()
-        await db.refresh(user)
+    else:
+        # Cập nhật tokens nếu có
+        if google_access_token:
+            user.google_access_token = google_access_token
+            if google_refresh_token:
+                user.google_refresh_token = google_refresh_token
+            user.google_token_expiry = google_token_expiry
+            
+    await db.commit()
+    await db.refresh(user)
         
     # Create tokens
     access_token = create_access_token(subject=user.id)
@@ -157,6 +216,77 @@ async def google_auth(
         "refresh_token": refresh_token,
         "token_type": "bearer"
     }
+ 
+@router.get("/google/connect")
+async def google_connect(agent_id: str = None, current_user: User = Depends(get_current_user)):
+    """Trả về URL OAuth2 để kết nối Gmail"""
+    # Lưu cả user_id và agent_id vào state để quay lại đúng trang
+    state = current_user.id
+    if agent_id:
+        state = f"{current_user.id}:{agent_id}"
+        
+    params = {
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state
+    }
+    url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
+    return {"url": url}
+
+@router.get("/google/callback")
+async def google_callback(code: str, state: str, db: AsyncSession = Depends(get_db)):
+    """Xử lý callback từ Google và lưu tokens"""
+    import httpx
+    
+    # 1. Trao đổi code lấy tokens
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+                "grant_type": "authorization_code",
+            }
+        )
+        
+        if token_resp.status_code != 200:
+            logger.error(f"Google Token Exchange Error: {token_resp.text}")
+            return RedirectResponse(f"{settings.ALLOWED_ORIGINS}/agents/create?error=token_exchange_failed")
+            
+        tokens = token_resp.json()
+        access_token = tokens.get("access_token")
+        refresh_token = tokens.get("refresh_token")
+        expires_in = tokens.get("expires_in", 3600)
+        
+        # 2. Cập nhật User trong DB
+        # Parse state để lấy user_id và agent_id
+        user_id = state
+        agent_id = None
+        if ":" in state:
+            user_id, agent_id = state.split(":", 1)
+            
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalars().first()
+        if user:
+            user.google_access_token = access_token
+            if refresh_token: # Google chỉ gửi refresh_token lần đầu hoặc khi prompt=consent
+                user.google_refresh_token = refresh_token
+            from datetime import datetime, timedelta, timezone
+            user.google_token_expiry = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+            await db.commit()
+            
+    # 3. Quay lại trang cấu hình Agent
+    redirect_url = f"{settings.ALLOWED_ORIGINS}/agents/create?google_connected=success"
+    if agent_id:
+        redirect_url = f"{settings.ALLOWED_ORIGINS}/agents/create?id={agent_id}&google_connected=success"
+        
+    return RedirectResponse(redirect_url)
 
 @router.post("/logout")
 async def logout(response: Response):

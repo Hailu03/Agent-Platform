@@ -17,18 +17,27 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useNotifications } from "@/hooks/use-notifications";
 
 export default function LandingPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { addNotification } = useNotifications();
 
   useEffect(() => {
     // Kiểm tra session cũ
     const token = localStorage.getItem("access_token");
-    if (token) {
+    if (token && !searchParams?.get("session_expired")) {
       router.push("/dashboard");
     }
-  }, [router]);
+
+    if (searchParams?.get("session_expired")) {
+      addNotification("warning", "Phiên làm việc hết hạn", "Vui lòng đăng nhập lại để tiếp tục.");
+      // Clear the param from URL
+      window.history.replaceState({}, document.title, "/");
+    }
+  }, [router, searchParams, addNotification]);
 
   return (
     <div className="flex flex-col min-h-screen bg-background overflow-hidden">

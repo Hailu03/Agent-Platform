@@ -35,7 +35,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="vi" className="h-full antialiased" suppressHydrationWarning>
-      <body className={`${beVietnam.variable} ${inter.variable} ${jetbrainsMono.variable} font-sans min-h-full flex flex-col`}>
+      <body 
+        className={`${beVietnam.variable} ${inter.variable} ${jetbrainsMono.variable} font-sans min-h-full flex flex-col`}
+        suppressHydrationWarning
+      >
         <GoogleOAuthProvider clientId={process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""}>
           <NotificationProvider>
             {children}

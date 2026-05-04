@@ -10,6 +10,7 @@ interface User {
   full_name: string;
   email: string;
   avatar_url?: string;
+  is_google_connected: boolean;
 }
 
 export function useAuth() {

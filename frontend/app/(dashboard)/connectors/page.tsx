@@ -47,10 +47,11 @@ export default function ConnectorsPage() {
     setLoading(false);
   }, []);
 
-  const filteredItems = items.filter(item => 
-    item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.agentName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredItems = items.filter(item => {
+    const nameMatch = (item.name || "").toString().toLowerCase().includes(searchQuery.toLowerCase());
+    const agentMatch = (item.agentName || "").toString().toLowerCase().includes(searchQuery.toLowerCase());
+    return nameMatch || agentMatch;
+  });
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -78,9 +79,9 @@ export default function ConnectorsPage() {
               <CardContent className="p-6 flex-1">
                 <div className="flex items-start justify-between mb-6">
                   <div className="w-12 h-12 rounded-[0.5rem] bg-blue-500/10 flex items-center justify-center border shadow-sm group-hover:scale-110 transition-transform">
-                    {item.name.includes("Google") ? <Globe className="w-6 h-6 text-blue-600" /> : 
-                     item.name.includes("Database") ? <Database className="w-6 h-6 text-blue-600" /> : 
-                     <Cloud className="w-6 h-6 text-blue-600" />}
+                    { (item.name || "").toString().includes("Google") ? <Globe className="w-6 h-6 text-blue-600" /> : 
+                      (item.name || "").toString().includes("Database") ? <Database className="w-6 h-6 text-blue-600" /> : 
+                      <Cloud className="w-6 h-6 text-blue-600" />}
                   </div>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

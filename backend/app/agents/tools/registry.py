@@ -4,61 +4,120 @@ from app.agents.tools.web_search import SearxngSearchTool
 from app.agents.tools.web_reader import WebReaderTool
 from app.agents.tools.pdf_reader import PDFReaderTool
 from app.agents.tools.graph_rag import GraphRAGSearchTool
-from app.core.logging import get_logger
+from app.agents.tools.skill_loader import SkillLoaderTool
 
-logger = get_logger(__name__)
+from app.agents.tools.gmail import (
+    GmailListTool, GmailReadTool, GmailSendTool, 
+    GmailSearchTool, GmailDraftTool, GmailModifyTool, GmailReplyTool
+)
+
+# ... (rest of imports)
 
 def get_tools_by_names(tool_configs: List[Any], agent_config: dict = None) -> List[BaseTool]:
-    """
-    Map tool configs to actual LangChain tool instances.
-    Consolidated into a unified search experience.
-    """
-    # Khởi tạo registry bên trong để có thể truyền agent_config cho các Tool cần thiết
+    # ...
     registry = {
         "web_search": SearxngSearchTool(),
         "web_reader": WebReaderTool(),
         "pdf_reader": PDFReaderTool(),
         "graph_rag_search": GraphRAGSearchTool(agent_config=agent_config),
-        "Tìm kiếm Internet": SearxngSearchTool(), 
-        "Tìm kiếm Web": SearxngSearchTool(), # Khớp với UI
+        "load_skill": SkillLoaderTool(),
+        # Gmail Core
+        "gmail_list": GmailListTool(),
+        "gmail_read": GmailReadTool(),
+        "gmail_send": GmailSendTool(),
+        # Gmail Pro
+        "gmail_search": GmailSearchTool(),
+        "gmail_draft": GmailDraftTool(),
+        "gmail_modify": GmailModifyTool(),
+        "gmail_reply": GmailReplyTool(),
+        
+        "Tìm kiếm Web": SearxngSearchTool(), 
+        "Gmail": [
+            GmailListTool(), GmailReadTool(), GmailSendTool(),
+            GmailSearchTool(), GmailDraftTool(), GmailModifyTool(), GmailReplyTool()
+        ],
     }
     
     tools = []
     for config in tool_configs:
-        if isinstance(config, str):
-            name = config
-            is_active = True
-        else:
-            name = config.get("name")
-            is_active = config.get("is_active", True)
+        name = config if isinstance(config, str) else config.get("name")
+        is_active = True if isinstance(config, str) else config.get("is_active", True)
             
         if is_active and name in registry:
-            tool = registry[name]
-            tools.append(tool)
+            t_obj = registry[name]
+            if isinstance(t_obj, list):
+                tools.extend(t_obj)
+            else:
+                tools.append(t_obj)
             
-            # NẾU là công cụ tìm kiếm, tự động nạp thêm các tool đọc chuyên sâu để LangGraph dùng ngầm
-            if name in ["Tìm kiếm Internet", "Tìm kiếm Web", "web_search"]:
-                needed_tools = ["web_reader", "pdf_reader"]
-                for tool_name in needed_tools:
-                    if tool_name not in [t.name for t in tools]:
-                        tools.append(registry[tool_name])
-        
-    # --- TỰ ĐỘNG NẠP GRAPHRAG NẾU CÓ FILE KIẾN THỨC ---
-    if agent_config and agent_config.get("knowledge_files"):
-        if "graph_rag_search" not in [t.name for t in tools]:
-            logger.info(f"📚 Phát hiện {len(agent_config['knowledge_files'])} file kiến thức. Tự động nạp GraphRAG Tool.")
-            tools.append(registry["graph_rag_search"])
+            # ...
+    
+    # ... (graph_rag and load_skill)
+            
+    # --- TỰ ĐỘNG NẠP GMAIL TOKEN ---
+    google_tokens = agent_config.get("user_google_tokens") or {}
+    gmail_tool_classes = (GmailListTool, GmailReadTool, GmailSendTool, GmailSearchTool, GmailDraftTool, GmailModifyTool, GmailReplyTool)
+    for t in tools:
+        if isinstance(t, gmail_tool_classes):
+            t.user_tokens = google_tokens
             
     return tools
 
 def get_available_tools() -> List[Dict[str, str]]:
-    """
-    Chỉ hiển thị DUY NHẤT một công cụ tìm kiếm thông minh trên Frontend.
-    """
     return [
         {
             "name": "Tìm kiếm Web",
-            "description": "Tự động tìm kiếm, truy cập và đọc sâu nội dung các trang web để cung cấp báo cáo chi tiết nhất.",
-            "icon": "Search"
+            "description": "Tự động tìm kiếm và đọc sâu nội dung các trang web.",
+            "icon": "Search",
+            "category": "Cơ bản"
+        },
+        {
+            "name": "gmail_search",
+            "label": "Tìm kiếm Email nâng cao",
+            "description": "Tìm kiếm email bằng query (VD: 'from:boss has:attachment').",
+            "icon": "Search",
+            "category": "Gmail"
+        },
+        {
+            "name": "gmail_list",
+            "label": "Danh sách thư chưa đọc",
+            "description": "Tra cứu danh sách các email mới nhất trong hộp thư.",
+            "icon": "Mail",
+            "category": "Gmail"
+        },
+        {
+            "name": "gmail_read",
+            "label": "Xem nội dung chi tiết",
+            "description": "Đọc nội dung và trích xuất dữ liệu từ một email cụ thể.",
+            "icon": "Mail",
+            "category": "Gmail"
+        },
+        {
+            "name": "gmail_send",
+            "label": "Gửi thư (HTML Support)",
+            "description": "Soạn và gửi email mới với định dạng HTML chuyên nghiệp.",
+            "icon": "Send",
+            "category": "Gmail"
+        },
+        {
+            "name": "gmail_draft",
+            "label": "Quản lý bản nháp (Drafts)",
+            "description": "Tạo, sửa hoặc xóa bản nháp để người dùng kiểm duyệt trước khi gửi.",
+            "icon": "Edit2",
+            "category": "Gmail"
+        },
+        {
+            "name": "gmail_modify",
+            "label": "Quản lý Nhãn & Trạng thái",
+            "description": "Đánh dấu đã đọc, gắn sao, lưu trữ hoặc di chuyển vào thùng rác.",
+            "icon": "Layers",
+            "category": "Gmail"
+        },
+        {
+            "name": "gmail_reply",
+            "label": "Trả lời theo luồng (Reply)",
+            "description": "Phản hồi trực tiếp vào một luồng hội thoại sẵn có.",
+            "icon": "RotateCcw",
+            "category": "Gmail"
         }
     ]

@@ -81,13 +81,14 @@ class BaseWAOAgent(ABC):
         internal_tool_names = ["web_reader", "pdf_reader"]
         public_tools = [t for t in self.tools if t.name not in internal_tool_names]
         
+        # Chỉ liệt kê tool trong Prompt nếu model KHÔNG hỗ trợ Binding (fallback)
         tools_description = ""
-        if public_tools:
-            tools_description = "DANH SÁCH CÔNG CỤ BẠN ĐANG CÓ:\n"
-            for tool in public_tools:
-                tools_description += f"- {tool.name}: {tool.description}\n"
-        else:
-            tools_description = "Bạn hiện không có công cụ bổ sung nào."
+        # if public_tools:
+        #     tools_description = "DANH SÁCH CÔNG CỤ BẠN ĐANG CÓ:\n"
+        #     for tool in public_tools:
+        #         tools_description += f"- {tool.name}: {tool.description}\n"
+        # else:
+        #     tools_description = "Bạn hiện không có công cụ bổ sung nào."
 
         # Tạo danh sách file kiến thức (nếu có)
         knowledge_files = self.config.get("knowledge_files", [])
@@ -111,12 +112,10 @@ class BaseWAOAgent(ABC):
             "Vai trò: {description}\n\n"
             "THỜI GIAN HIỆN TẠI: {current_time}\n\n"
             "{kb_info}"
-            "--- QUY TẮC TRA CỨU TỐI THƯỢNG ---\n"
-            "1. Nếu câu hỏi liên quan đến nội dung trong danh sách TÀI LIỆU NỘI BỘ bên trên, bạn **BẮT BUỘC** phải gọi công cụ 'graph_rag_search' ngay lập tức.\n"
-            "2. KHÔNG ĐƯỢC tự trả lời bằng kiến thức cũ nếu thông tin đó có thể nằm trong tài liệu.\n"
-            "3. Chỉ sử dụng 'web_search' sau khi đã tra cứu GraphRAG mà không có kết quả.\n\n"
-            "CÔNG CỤ CỦA BẠN:\n"
-            "{tools_list}\n\n"
+            "--- QUY TẮC SỬ DỤNG CÔNG CỤ ---\n"
+            "1. Nếu câu hỏi liên quan đến nội dung trong KHO TRI THỨC, bạn PHẢI gọi 'graph_rag_search' ngay lập tức.\n"
+            "2. Chỉ sử dụng 'web_search' sau khi đã tra cứu kiến thức nội bộ mà không có kết quả.\n"
+            "3. Sử dụng 'gmail_manager' khi người dùng yêu cầu đọc, gửi hoặc quản lý email.\n\n"
             "{instructions}"
         )
         

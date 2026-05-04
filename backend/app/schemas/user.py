@@ -14,12 +14,14 @@ class UserLogin(BaseModel):
     password: str
 
 class GoogleLogin(BaseModel):
-    id_token: str
+    id_token: Optional[str] = None
+    code: Optional[str] = None
 
 class UserResponse(UserBase):
     id: str
     is_active: bool
     is_verified: bool
+    is_google_connected: bool = False
     created_at: datetime
 
     class Config:

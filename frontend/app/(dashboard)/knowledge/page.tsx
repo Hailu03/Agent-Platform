@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { 
   Database, 
   FileText, 
@@ -34,6 +35,7 @@ interface KnowledgeItem {
 }
 
 export default function KnowledgePage() {
+  const router = useRouter();
   const { agents, loading } = useAgents();
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -58,10 +60,11 @@ export default function KnowledgePage() {
     }
   });
 
-  const filteredItems = items.filter(item => 
-    item.fileName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.agentName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredItems = items.filter(item => {
+    const fileMatch = (item.fileName || "").toString().toLowerCase().includes(searchQuery.toLowerCase());
+    const agentMatch = (item.agentName || "").toString().toLowerCase().includes(searchQuery.toLowerCase());
+    return fileMatch || agentMatch;
+  });
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -71,7 +74,10 @@ export default function KnowledgePage() {
           <h1 className="text-3xl font-bold tracking-tight">Kho Tri Thức</h1>
           <p className="text-muted-foreground mt-1 text-sm font-medium opacity-80">Quản lý toàn bộ tài liệu đã tải lên hệ thống.</p>
         </div>
-        <Button className="rounded-[0.5rem] h-10 gap-2 shadow-lg shadow-primary/20 font-bold px-6">
+        <Button 
+          className="rounded-[0.5rem] h-10 gap-2 shadow-lg shadow-primary/20 font-bold px-6"
+          onClick={() => router.push("/connectors")}
+        >
           <Database className="w-4 h-4" />
           Quản lý Bucket
         </Button>
@@ -82,7 +88,7 @@ export default function KnowledgePage() {
         <div className="relative w-full md:w-96">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input 
-            placeholder="Tìm tài liệu hoặc agent..." 
+            placeholder="Tìm tài liệu ..." 
             className="pl-10 rounded-[0.5rem] h-11 border-muted-foreground/20 bg-background/50" 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}

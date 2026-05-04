@@ -48,10 +48,11 @@ export default function WorkflowsPage() {
           const allTools: WorkflowItem[] = [];
           data.forEach(agent => {
             if (agent.tools) {
-              agent.tools.forEach((tool: string) => {
+              agent.tools.forEach((tool: any) => {
+                const toolName = typeof tool === "string" ? tool : (tool.name || "Unknown Workflow");
                 allTools.push({
-                  id: `${agent.id}-${tool}`,
-                  name: tool,
+                  id: `${agent.id}-${toolName}`,
+                  name: toolName,
                   agentId: agent.id,
                   agentName: agent.name
                 });
@@ -70,10 +71,11 @@ export default function WorkflowsPage() {
     fetchAgents();
   }, []);
 
-  const filteredItems = items.filter(item => 
-    item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.agentName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredItems = items.filter(item => {
+    const nameMatch = (item.name || "").toString().toLowerCase().includes(searchQuery.toLowerCase());
+    const agentMatch = (item.agentName || "").toString().toLowerCase().includes(searchQuery.toLowerCase());
+    return nameMatch || agentMatch;
+  });
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -94,7 +96,7 @@ export default function WorkflowsPage() {
         <div className="relative w-full md:w-96">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input 
-            placeholder="Tìm quy trình hoặc agent..." 
+            placeholder="Tìm quy trình ..." 
             className="pl-10 rounded-[0.5rem] h-11 border-muted-foreground/20 bg-background/50" 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}

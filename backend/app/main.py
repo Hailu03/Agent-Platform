@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.models.base import engine, Base
-from .routers import auth, agent, chat
+from .routers import auth, agent, chat, skill
 from app.core.logging import setup_logging
 
 # Khởi tạo logging
@@ -26,6 +26,7 @@ app = FastAPI(
 # Auth Router
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(agent.router, prefix="/api/v1")
+app.include_router(skill.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1/chat")
 
 # CORS configuration

@@ -12,10 +12,9 @@ import {
   Hammer
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState, useEffect } from "react";
-import { ChevronDown, ChevronRight, FileText, Zap, Link2, Share2 } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ChevronRight, FileText } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useAgents } from "@/hooks/use-agents";
 
 interface SubItem {
   id: string;
@@ -31,65 +30,23 @@ interface MenuItem {
   subItems?: SubItem[];
 }
 
-const menuItems = [
-  { name: "Tổng quan", href: "/dashboard", icon: LayoutDashboard },
-  { name: "AI Agents", href: "/agents", icon: Bot },
-  { name: "Knowledge", href: "/knowledge", icon: Database },
-  { name: "Workflows", href: "/workflows", icon: GitBranch },
-  { name: "Skills", href: "/skills", icon: Wrench },
-  { name: "Connectors", href: "/connectors", icon: Plug2 },
-];
+
 
 export function Sidebar() {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const { agents } = useAgents();
+
 
   const toggleExpand = (name: string) => {
     setExpanded(prev => ({ ...prev, [name]: !prev[name] }));
   };
 
-  const getSubItems = (type: "knowledge" | "skills" | "workflows" | "connectors"): SubItem[] => {
-    const items: SubItem[] = [];
-    agents.forEach(agent => {
-      if (type === "knowledge" && agent.knowledge_files) {
-        agent.knowledge_files.forEach((file: any) => {
-          const fileName = typeof file === "string" ? (file.split("/").pop() || file) : (file.filename || file.object_name);
-          const fileId = typeof file === "string" ? file : (file.object_name || file.filename);
-          items.push({ 
-            id: `${agent.id}-${fileId}`, 
-            name: fileName, 
-            agentName: agent.name,
-            href: `/knowledge/${agent.id}`
-          });
-        });
-      } else if (type === "skills" && agent.skills) {
-        agent.skills.forEach((skill: string) => {
-          items.push({ 
-            id: `${agent.id}-${skill}`, 
-            name: skill, 
-            agentName: agent.name,
-            href: `/skills/${agent.id}`
-          });
-        });
-      } else if (type === "workflows" && agent.tools) {
-        agent.tools.forEach((tool: string) => {
-          items.push({ 
-            id: `${agent.id}-${tool}`, 
-            name: tool, 
-            agentName: agent.name,
-            href: `/workflows/${agent.id}`
-          });
-        });
-      }
-    });
-    return items;
-  };
+
 
   const menuItems: MenuItem[] = [
     { name: "Tổng quan", href: "/dashboard", icon: LayoutDashboard },
     { name: "AI Agents", href: "/agents", icon: Bot },
-    { name: "Knowledge", href: "/knowledge", icon: Database, subItems: getSubItems("knowledge") },
+    { name: "Knowledge", href: "/knowledge", icon: Database },
     { name: "Workflows", href: "/workflows", icon: GitBranch },
     { name: "Skills", href: "/skills", icon: Wrench },
     { name: "Tools", href: "/tools", icon: Hammer },

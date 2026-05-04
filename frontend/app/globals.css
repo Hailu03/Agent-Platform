@@ -120,3 +120,73 @@
 .text-gradient {
   @apply bg-clip-text text-transparent bg-gradient-to-r from-green-600 to-green-400;
 }
+
+/* Markdown Preview Styles */
+.markdown-preview {
+  line-height: 1.6;
+  font-size: 14px;
+}
+
+.markdown-preview h1 {
+  @apply text-2xl font-black mt-6 mb-4 pb-2 border-b;
+}
+
+.markdown-preview h2 {
+  @apply text-xl font-bold mt-5 mb-3;
+}
+
+.markdown-preview h3 {
+  @apply text-lg font-bold mt-4 mb-2;
+}
+
+.markdown-preview p {
+  @apply mb-4 text-muted-foreground leading-relaxed;
+}
+
+.markdown-preview ul, .markdown-preview ol {
+  @apply mb-4 pl-6;
+}
+
+.markdown-preview ul {
+  @apply list-disc;
+}
+
+.markdown-preview ol {
+  @apply list-decimal;
+}
+
+.markdown-preview li {
+  @apply mb-1;
+}
+
+.markdown-preview code {
+  @apply px-1.5 py-0.5 rounded bg-muted font-mono text-[0.9em] text-primary font-bold;
+}
+
+.markdown-preview pre {
+  @apply p-4 rounded-xl bg-zinc-950 text-zinc-100 font-mono text-[13px] mb-4 overflow-x-auto border border-white/10;
+}
+
+.markdown-preview pre code {
+  @apply p-0 bg-transparent text-inherit font-normal;
+}
+
+.markdown-preview blockquote {
+  @apply pl-4 border-l-4 border-primary/30 italic text-muted-foreground mb-4;
+}
+
+.markdown-preview strong {
+  @apply font-black text-foreground;
+}
+
+.markdown-preview table {
+  @apply w-full border-collapse mb-4;
+}
+
+.markdown-preview th, .markdown-preview td {
+  @apply border p-2 text-left;
+}
+
+.markdown-preview th {
+  @apply bg-muted font-bold;
+}

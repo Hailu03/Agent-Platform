@@ -2,6 +2,9 @@ import json
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from app.core.redis import redis_cache
+from app.models.agent import Agent
+from app.models.skill import Skill
+from app.models.user import User
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.agents.graph import create_chat_graph
@@ -10,6 +13,8 @@ from app.agents.states.agent_state import Context
 from app.repositories.agent_repo import AgentRepository
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres.aio import AsyncPostgresStore
+from sqlalchemy import select
+from app.models.skill import Skill
 from psycopg_pool import AsyncConnectionPool
 
 logger = get_logger(__name__)
@@ -81,7 +86,7 @@ class ChatService:
         if cached_res:
             return cached_res
 
-        agent_config = self._get_agent_config(agent_db)
+        agent_config = await self._get_agent_config(agent_db)
         graph = create_chat_graph(agent_config)
         
         input_state = self._prepare_input_state(agent_id, agent_db, message)
@@ -119,7 +124,7 @@ class ChatService:
 
         async def event_generator():
             # --- ĐÃ CÓ AGENT DB Ở TRÊN ---
-            agent_config = self._get_agent_config(agent_db)
+            agent_config = await self._get_agent_config(agent_db)
             
             # Khởi tạo Postgres Checkpointer (Lưu vào DB lâu dài)
             pool = await self.get_pool()
@@ -279,17 +284,65 @@ class ChatService:
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-    def _get_agent_config(self, agent_db):
+    async def _get_agent_config(self, agent_db):
+        # Implement "Deep Agents" Skill System pattern
+        skills_system_prompt = ""
+        if agent_db.skills:
+            active_skills = [s for s in agent_db.skills if s.get("is_active", True)]
+            if active_skills:
+                skills_system_prompt = "\n### 🚀 SKILLS SYSTEM (PRIORITY)\n"
+                skills_system_prompt += "You have a library of high-level expert skills. **ALWAYS** prioritize using these skills to handle user requests. "
+                skills_system_prompt += "These skills contain specific workflows and guidance on which tools to use for maximum efficiency.\n\n"
+                skills_system_prompt += "Follow the **Match-Read-Execute** workflow (MANDATORY):\n"
+                skills_system_prompt += "1. **Match**: Compare the user request with the descriptions in the SKILLS LIBRARY below.\n"
+                skills_system_prompt += "2. **Read**: If a skill matches, use the `load_skill` tool immediately to get the full execution logic.\n"
+                skills_system_prompt += "3. **Execute**: Strictly follow the instructions and tool-calling strategies provided in the skill's content.\n\n"
+                skills_system_prompt += "SKILLS LIBRARY:\n"
+                
+                # Fetch descriptions for accurate matching
+                skill_names = [s["name"] for s in active_skills]
+                result = await self.agent_repo.db.execute(
+                    select(Skill.name, Skill.description).where(Skill.name.in_(skill_names))
+                )
+                skills_data = result.all()
+                
+                for name, desc in skills_data:
+                    skills_system_prompt += f"- **{name}**: {desc or 'No description available.'}\n"
+
+        # Fetch user google tokens if email manager is enabled
+        user_google_tokens = None
+        if any(t.get("name") == "Quản lý Email" and t.get("is_active", True) for t in (agent_db.tools or [])):
+            result = await self.agent_repo.db.execute(select(User).where(User.id == agent_db.user_id))
+            user = result.scalars().first()
+            if user:
+                user_google_tokens = {
+                    "access_token": user.google_access_token,
+                    "refresh_token": user.google_refresh_token,
+                    "expiry": user.google_token_expiry
+                }
+
+        # Combine agent instructions with skills system prompt
+        combined_instructions = agent_db.instructions or ""
+        if skills_system_prompt:
+            combined_instructions += skills_system_prompt
+
         return {
+            "id": agent_db.id,
+            "user_id": agent_db.user_id,
             "name": agent_db.name,
             "specialty": agent_db.specialty,
             "description": agent_db.description,
             "model_provider": agent_db.model_provider,
             "model_name": agent_db.model_name,
             "api_key": agent_db.api_key,
-            "instructions": agent_db.instructions,
-            "tools": agent_db.tools,
+            "instructions": combined_instructions,
+            "tools": agent_db.tools or [],
             "knowledge_files": agent_db.knowledge_files or [],
+            "skills": agent_db.skills or [],
+            "embedding_provider": agent_db.embedding_provider,
+            "embedding_model": agent_db.embedding_model,
+            "embedding_api_key": agent_db.embedding_api_key,
+            "user_google_tokens": user_google_tokens
         }
 
     def _prepare_input_state(self, agent_id, agent_db, message, cache_reference=""):

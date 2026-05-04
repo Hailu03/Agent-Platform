@@ -36,7 +36,7 @@ export default function AgentsPage() {
       (filter === "running" && agent.is_active) || 
       (filter === "paused" && !agent.is_active);
     
-    const matchesSearch = agent.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = (agent.name || "").toString().toLowerCase().includes(searchQuery.toLowerCase());
     
     return matchesFilter && matchesSearch;
   });
