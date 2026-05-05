@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { 
   LayoutDashboard, 
   Bot, 
@@ -9,12 +9,17 @@ import {
   GitBranch, 
   Plug2, 
   Wrench,
-  Hammer
+  Hammer,
+  ChevronDown, 
+  ChevronRight, 
+  FileText,
+  Menu,
+  MessageSquare
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
-import { ChevronDown, ChevronRight, FileText } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useEffect } from "react";
 
 interface SubItem {
   id: string;
@@ -30,21 +35,33 @@ interface MenuItem {
   subItems?: SubItem[];
 }
 
-
-
 export function Sidebar() {
   const pathname = usePathname();
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-
   const toggleExpand = (name: string) => {
+    if (isCollapsed) return;
     setExpanded(prev => ({ ...prev, [name]: !prev[name] }));
   };
 
+  const toggleSidebar = () => {
+    const newState = !isCollapsed;
+    setIsCollapsed(newState);
+    localStorage.setItem("sidebar-collapsed", JSON.stringify(newState));
+  };
 
+  // Load state from localStorage on mount
+  useEffect(() => {
+    const savedState = localStorage.getItem("sidebar-collapsed");
+    if (savedState !== null) {
+      setIsCollapsed(JSON.parse(savedState));
+    }
+  }, []);
 
   const menuItems: MenuItem[] = [
     { name: "Tổng quan", href: "/dashboard", icon: LayoutDashboard },
+    { name: "Hội thoại", href: "/chat", icon: MessageSquare },
     { name: "AI Agents", href: "/agents", icon: Bot },
     { name: "Knowledge", href: "/knowledge", icon: Database },
     { name: "Workflows", href: "/workflows", icon: GitBranch },
@@ -54,85 +71,110 @@ export function Sidebar() {
   ];
 
   return (
-    <aside className="w-64 border-r bg-card flex flex-col h-full sticky top-0 overflow-y-auto custom-scrollbar">
-      {/* Brand Logo */}
-      <div className="p-6">
-        <Link href="/" className="flex items-center gap-3 font-bold text-2xl tracking-tighter group">
-          <div className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary/30 group-hover:scale-105 transition-transform duration-300">
-            <span className="font-black text-xl leading-none pt-0.5">W</span>
+    <motion.aside 
+      initial={false}
+      animate={{ width: isCollapsed ? 72 : 260 }}
+      transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+      className={cn(
+        "relative h-screen bg-card border-r flex flex-col z-50 shadow-[4px_0_24px_rgba(0,0,0,0.02)]",
+        "transition-colors duration-300"
+      )}
+    >
+      {/* Header Section */}
+      <div className={cn(
+        "h-20 flex items-center mb-2 overflow-hidden shrink-0",
+        isCollapsed ? "justify-center" : "justify-between pl-6 pr-2"
+      )}>
+        <Link href="/" className={cn("flex items-center gap-3 shrink-0", isCollapsed && "hidden")}>
+          <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary/25">
+            <span className="font-black text-xl pt-0.5">W</span>
           </div>
-          <span className="bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">WAO AI</span>
+          
+          <AnimatePresence mode="wait">
+            {!isCollapsed && (
+              <motion.span 
+                initial={{ opacity: 0, width: 0 }}
+                animate={{ opacity: 1, width: "auto" }}
+                exit={{ opacity: 0, width: 0 }}
+                className="font-extrabold text-xl tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-foreground to-foreground/60 whitespace-nowrap overflow-hidden"
+              >
+                WAO AI
+              </motion.span>
+            )}
+          </AnimatePresence>
         </Link>
+
+        {/* Minimal Menu Toggle - Flush to right edge */}
+        <button 
+          onClick={toggleSidebar}
+          className={cn(
+            "p-2 text-muted-foreground hover:text-primary transition-colors shrink-0",
+            isCollapsed && "mx-auto"
+          )}
+        >
+          <Menu className="w-6 h-6" />
+        </button>
       </div>
 
-      {/* Main Navigation */}
-      <nav className="flex-1 px-3 space-y-1 pb-10">
+      {/* Navigation */}
+      <nav className={cn(
+        "flex-1 space-y-2 overflow-y-auto custom-scrollbar pt-2",
+        isCollapsed ? "px-2" : "px-4"
+      )}>
         {menuItems.map((item) => {
           const isActive = pathname === item.href;
-          const isExpanded = expanded[item.name];
+          const isItemExpanded = expanded[item.name];
           const hasSubItems = item.subItems && item.subItems.length > 0;
 
           return (
-            <div key={item.name} className="space-y-1">
-              <div 
+            <div key={item.name} className="relative">
+              <Link
+                href={item.href}
                 className={cn(
-                  "flex items-center justify-between rounded-xl transition-all duration-200 group",
+                  "flex items-center rounded-xl transition-all duration-300 group overflow-hidden",
                   isActive 
-                    ? "bg-primary text-white shadow-lg shadow-primary/20" 
-                    : "text-muted-foreground hover:bg-secondary/80 hover:text-foreground"
+                    ? "bg-primary text-white shadow-md shadow-primary/20" 
+                    : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+                  isCollapsed ? "justify-center p-2.5" : "gap-3 px-3 py-2.5"
                 )}
+                title={isCollapsed ? item.name : ""}
               >
-                <Link href={item.href} className="flex items-center gap-3 flex-1 px-3 py-2.5">
-                  <item.icon className={cn("w-5 h-5", isActive ? "text-white" : "group-hover:text-primary")} />
-                  <span className="font-bold text-[13px]">{item.name}</span>
-                </Link>
-                
-                {hasSubItems && (
+                <div className="flex items-center justify-center shrink-0">
+                  <item.icon className={cn(
+                    "w-5 h-5 transition-transform duration-300 group-hover:scale-110",
+                    isActive ? "text-white" : "group-hover:text-primary"
+                  )} />
+                </div>
+
+                <AnimatePresence mode="wait">
+                  {!isCollapsed && (
+                    <motion.span 
+                      initial={{ opacity: 0, width: 0 }}
+                      animate={{ opacity: 1, width: "auto" }}
+                      exit={{ opacity: 0, width: 0 }}
+                      className="font-bold text-[13px] truncate whitespace-nowrap overflow-hidden flex-1"
+                    >
+                      {item.name}
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+
+                {hasSubItems && !isCollapsed && (
                   <button 
-                    onClick={() => toggleExpand(item.name)}
-                    className={cn(
-                      "p-2 mr-1 rounded-lg transition-colors",
-                      isActive ? "hover:bg-white/10" : "hover:bg-black/5"
-                    )}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      toggleExpand(item.name);
+                    }}
+                    className="p-1 hover:bg-white/10 rounded-md shrink-0"
                   >
-                    {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                    {isItemExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                   </button>
                 )}
-              </div>
-
-              <AnimatePresence>
-                {isExpanded && hasSubItems && (
-                  <motion.div 
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2, ease: "easeInOut" }}
-                    className="overflow-hidden ml-4 pl-4 border-l border-muted-foreground/10 space-y-1 mt-1"
-                  >
-                    {item.subItems?.map((sub) => (
-                      <Link
-                        key={sub.id}
-                        href={sub.href}
-                        className="flex flex-col py-2 px-3 rounded-lg hover:bg-secondary/50 transition-colors group/sub"
-                      >
-                        <div className="flex items-center gap-2">
-                          <FileText className="w-3 h-3 text-muted-foreground/50 group-hover/sub:text-primary transition-colors" />
-                          <span className="text-[11px] font-bold text-muted-foreground group-hover/sub:text-foreground truncate max-w-[140px]">
-                            {sub.name}
-                          </span>
-                        </div>
-                        <span className="text-[9px] text-muted-foreground/50 font-medium ml-5 italic">
-                          @{sub.agentName}
-                        </span>
-                      </Link>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              </Link>
             </div>
           );
         })}
       </nav>
-    </aside>
+    </motion.aside>
   );
 }

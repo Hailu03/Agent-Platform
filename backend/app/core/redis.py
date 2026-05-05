@@ -1,4 +1,5 @@
 import redis
+import redis.asyncio as async_redis
 import json
 import hashlib
 from typing import Optional, Any, Dict
@@ -62,7 +63,7 @@ class SemanticCache:
             logger.error(f"❌ Lỗi Ensure Collection Cache: {e}")
             return False
 
-    def get_chat_cache(self, agent_id: str, user_id: str, message: str, agent_db: Any = None) -> Optional[Dict[str, Any]]:
+    def get_chat_cache(self, agent_id: str, user_id: str, message: str, agent_db: Any = None, thread_id: str = None) -> Optional[Dict[str, Any]]:
         try:
             # Khởi tạo Embeddings từ Factory dựa trên config của Agent
             if not agent_db:
@@ -86,15 +87,15 @@ class SemanticCache:
             if not self._ensure_collection(collection_name, len(query_vector)):
                 return None
             
-            # 2. Tìm câu hỏi tương đương trong Qdrant (Lọc theo user_id)
+            # 2. Tìm câu hỏi tương đương trong Qdrant (Lọc theo user_id và thread_id)
+            must_filter = [models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))]
+            if thread_id:
+                must_filter.append(models.FieldCondition(key="thread_id", match=models.MatchValue(value=thread_id)))
+
             search_result = self.qdrant.query_points(
                 collection_name=collection_name,
                 query=query_vector,
-                query_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))
-                    ]
-                ),
+                query_filter=models.Filter(must=must_filter),
                 limit=1
             ).points
             
@@ -110,7 +111,7 @@ class SemanticCache:
             logger.error(f"❌ Lỗi Semantic Cache Get: {e}")
         return None
 
-    def set_chat_cache(self, agent_id: str, user_id: str, message: str, response: Dict[str, Any], agent_db: Any = None):
+    def set_chat_cache(self, agent_id: str, user_id: str, message: str, response: Dict[str, Any], agent_db: Any = None, thread_id: str = None):
         try:
             if not agent_db:
                 return
@@ -131,7 +132,7 @@ class SemanticCache:
             # 1. Lưu nội dung vào Redis
             self.redis.set(cache_key, json.dumps(response), ex=86400)
             
-            # 2. Lưu Vector và Key vào Qdrant (Kèm theo user_id)
+            # 2. Lưu Vector và Key vào Qdrant (Kèm theo user_id và thread_id)
             vector = embeddings.embed_query(message)
             
             collection_name = self._get_collection_name(agent_db)
@@ -149,14 +150,18 @@ class SemanticCache:
                         payload={
                             "agent_id": agent_id,
                             "user_id": user_id,
+                            "thread_id": thread_id,
                             "question": message,
                             "cache_key": cache_key
                         }
                     )
                 ]
             )
-            logger.info(f"💾 Đã lưu Semantic Cache vào {collection_name}")
+            logger.info(f"💾 Đã lưu Semantic Cache vào {collection_name} (Thread: {thread_id})")
         except Exception as e:
             logger.error(f"❌ Lỗi Semantic Cache Set: {e}")
 
 redis_cache = SemanticCache()
+
+# Global Async Redis Client for SSE/PubSub
+async_redis_client = async_redis.from_url(settings.REDIS_URL, decode_responses=True)

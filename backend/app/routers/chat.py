@@ -21,8 +21,9 @@ def get_chat_service(db: AsyncSession = Depends(get_db)) -> ChatService:
 class ChatRequest(BaseModel):
     agent_id: str
     message: str
+    thread_id: Optional[str] = None
     history: List[Dict[str, str]] = []
-    command: Optional[Dict] = None # Cho phép null hoặc thiếu
+    command: Optional[Dict] = None
 
 @router.post("/")
 async def chat(
@@ -35,6 +36,7 @@ async def chat(
         request.agent_id, 
         current_user.id, 
         request.message,
+        thread_id=request.thread_id,
         command=request.command
     )
 
@@ -52,5 +54,24 @@ async def chat_stream(
         request.agent_id,
         current_user.id,
         request.message,
+        thread_id=request.thread_id,
         command=request.command
     )
+
+@router.get("/conversations")
+async def get_conversations(
+    agent_id: Optional[str] = None,
+    service: ChatService = Depends(get_chat_service),
+    current_user: User = Depends(get_current_user)
+):
+    """Lấy danh sách các phiên hội thoại"""
+    return await service.get_conversations(current_user.id, agent_id)
+
+@router.get("/history/{thread_id}")
+async def get_thread_history(
+    thread_id: str,
+    service: ChatService = Depends(get_chat_service),
+    current_user: User = Depends(get_current_user)
+):
+    """Lấy lịch sử tin nhắn của một thread"""
+    return await service.get_thread_history(thread_id, current_user.id)

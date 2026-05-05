@@ -3,9 +3,13 @@ from app.models.agent import Agent
 from app.schemas.agent import AgentCreate, AgentUpdate
 import uuid
 
+from app.services.notification_service import NotificationService
+from app.models.notification import NotificationType
+
 class AgentService:
     def __init__(self, repo: AgentRepository):
         self.repo = repo
+        self.notification_service = NotificationService(repo.db)
 
     async def get_agent(self, agent_id: str, user_id: str):
         agent = await self.repo.get_by_id(agent_id, user_id)
@@ -79,6 +83,15 @@ class AgentService:
                 )
         
         await self._sync_datasource_config(agent)
+        
+        # Bắn thông báo tạo thành công
+        await self.notification_service.create_notification(
+            user_id=user_id,
+            type=NotificationType.SUCCESS,
+            title="Tạo Agent thành công",
+            message=f"Agent {agent.name} đã được tạo và sẵn sàng sử dụng."
+        )
+
         self._mask_agent_keys(agent)
         return agent
 
@@ -160,6 +173,15 @@ class AgentService:
             
         updated_agent = await self.repo.update(agent)
         await self._sync_datasource_config(updated_agent)
+
+        # Bắn thông báo cập nhật thành công
+        await self.notification_service.create_notification(
+            user_id=user_id,
+            type=NotificationType.SUCCESS,
+            title="Cập nhật thành công",
+            message=f"Cấu hình của Agent {updated_agent.name} đã được lưu."
+        )
+
         self._mask_agent_keys(updated_agent)
         return updated_agent
 

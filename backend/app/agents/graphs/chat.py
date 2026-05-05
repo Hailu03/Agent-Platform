@@ -28,8 +28,8 @@ class WAOChatAgent(BaseWAOAgent):
         async def _agent_node(state, config):
             return await chat_agent_node(state, config, self)
             
-        async def _tools_node(state):
-            return await chat_tools_node(state, self)
+        async def _tools_node(state, config):
+            return await chat_tools_node(state, config, self)
             
         async def _research_refiner_node(state):
             return await research_refiner_node(state, self)

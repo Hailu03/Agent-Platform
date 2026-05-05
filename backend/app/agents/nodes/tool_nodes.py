@@ -8,23 +8,26 @@ from app.core.redis import redis_cache
 
 logger = get_logger(__name__)
 
-async def chat_tools_node(state: AgentState, agent_instance):
+async def chat_tools_node(state: AgentState, config: dict, agent_instance):
     """
-    Node thực thi công cụ có hỗ trợ Caching.
+    Node thực thi công cụ có hỗ trợ Caching + Thread Isolation.
     """
     last_message = state["messages"][-1]
     agent_id = state.get("agent_id", "default")
     tool_counts = state.get("tool_counts") or {}
+    
+    # Lấy thread_id từ config để phân loại session
+    thread_id = config.get("configurable", {}).get("thread_id", "default")
     
     results = []
     for tool_call in last_message.tool_calls:
         tool_name = tool_call["name"]
         tool_args = tool_call["args"]
         
-        # 1. Tạo Cache Key
+        # 1. Tạo Cache Key (Kèm thread_id)
         args_str = json.dumps(tool_args, sort_keys=True)
         cache_hash = hashlib.md5(f"{tool_name}:{args_str}".encode()).hexdigest()
-        cache_key = f"tool_cache:{agent_id}:{cache_hash}"
+        cache_key = f"tool_cache:{thread_id}:{agent_id}:{cache_hash}"
         
         # 2. Kiểm tra Cache
         cached_result = redis_cache.redis.get(cache_key)

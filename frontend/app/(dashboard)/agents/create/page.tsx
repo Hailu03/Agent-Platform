@@ -44,6 +44,7 @@ import {
   RefreshCcw,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { ChatInterface } from "@/components/shared/ChatInterface";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -325,10 +326,10 @@ function CreateAgentContent() {
   const [activeTab, setActiveTab] = useState("general");
   const [showPreview, setShowPreview] = useState(true);
   const [isOtherSpecialty, setIsOtherSpecialty] = useState(false);
-  const [messages, setMessages] = useState<{ 
-    role: string, 
-    content: string, 
-    thinking?: string, 
+  const [messages, setMessages] = useState<{
+    role: string,
+    content: string,
+    thinking?: string,
     done?: boolean,
     status?: string,
     interrupt?: {
@@ -441,6 +442,39 @@ function CreateAgentContent() {
   const [showToolConfig, setShowToolConfig] = useState(false);
   const [editingTool, setEditingTool] = useState<any>(null);
   const [toolOverrideData, setToolOverrideData] = useState({ label: "", description: "" });
+  const [previewWidth, setPreviewWidth] = useState(480);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResizing = (e: React.MouseEvent) => {
+    setIsResizing(true);
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+
+      // Khung chat nằm bên phải, nên khi kéo về bên trái (X giảm) thì width tăng
+      const newWidth = window.innerWidth - e.clientX - 16; // 16 là padding
+      if (newWidth > 320 && newWidth < 800) {
+        setPreviewWidth(newWidth);
+      }
+    };
+
+    const stopResizing = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", stopResizing);
+    }
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", stopResizing);
+    };
+  }, [isResizing]);
 
   const handleToolConfigChange = (toolName: string, config: any) => {
     setFormData(prev => ({
@@ -530,130 +564,7 @@ function CreateAgentContent() {
     onConfirm: () => { },
   });
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
 
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-    // Nếu khoảng cách tới đáy < 100px thì coi như đang ở đáy và bật auto-scroll
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
-    setShouldAutoScroll(isAtBottom);
-  };
-
-  // Hàm cập nhật form và đánh dấu là đã thay đổi
-  const updateFormData = (updater: (prev: any) => any) => {
-    setFormData(prev => {
-      const next = updater(prev);
-      setIsDirty(true);
-      return next;
-    });
-  };
-  const scrollToBottom = () => {
-    if (shouldAutoScroll) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  };
-
-  const handleChat = async (content: string, command: any = null) => {
-    if (!agentId) return;
-
-    if (!command) {
-      setMessages(prev => [...prev, { role: "user", content }]);
-      setMessages(prev => [...prev, { role: "assistant", content: "", done: false, status: "" }]);
-    } else {
-      setMessages(prev => {
-        const newMsgs = prev.slice();
-        const lastIdx = newMsgs.length - 1;
-        if (lastIdx >= 0) {
-          newMsgs[lastIdx] = { ...newMsgs[lastIdx], done: false, interrupt: null, status: "Đang xử lý..." };
-        }
-        return newMsgs;
-      });
-    }
-
-    try {
-      const response = await fetchWithAuth("/chat/stream", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          agent_id: agentId,
-          message: content,
-          command: command
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error("Stream failed with status:", response.status, errorData);
-        throw new Error(`Stream failed: ${response.status} ${JSON.stringify(errorData)}`);
-      }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value);
-          const lines = chunk.split("\n");
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              const dataStr = line.replace("data: ", "").trim();
-              if (dataStr === "[DONE]") continue;
-
-              try {
-                const data = JSON.parse(dataStr);
-
-                setMessages(prev => {
-                  const newMsgs = prev.slice();
-                  const lastIdx = newMsgs.length - 1;
-                  if (lastIdx >= 0) {
-                    const last = newMsgs[lastIdx];
-                    // Tạo object MỚI thay vì mutate (tránh lỗi StrictMode double-invoke)
-                    newMsgs[lastIdx] = {
-                      ...last,
-                      ...(data.thinking ? { thinking: (last.thinking || "") + data.thinking } : {}),
-                      ...(data.content ? { content: (last.content || "") + data.content } : {}),
-                      ...(data.status ? { status: data.status } : {}),
-                      ...(data.interrupt ? { interrupt: data.interrupt, done: true } : {})
-                    };
-                  }
-                  return newMsgs;
-                });
-              } catch (e) {
-                console.error("Error parsing SSE data:", e);
-              }
-            }
-          }
-        }
-
-        setMessages(prev => {
-          const newMsgs = prev.slice();
-          const lastIdx = newMsgs.length - 1;
-          if (lastIdx >= 0 && !newMsgs[lastIdx].interrupt) {
-            newMsgs[lastIdx] = { ...newMsgs[lastIdx], done: true, status: "" };
-          }
-          return newMsgs;
-        });
-      }
-    } catch (error) {
-      console.error("Chat error:", error);
-      addNotification("error", "Lỗi hội thoại", "Không thể kết nối với Agent.");
-    }
-  };
-
-  const handleResume = (approved: boolean) => {
-    handleChat("", { approved });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
 
   useEffect(() => {
     const fetchDependencies = async () => {
@@ -726,16 +637,16 @@ function CreateAgentContent() {
               specialty: data.specialty || "",
               model_provider: data.model_provider || "openai",
               model_name: data.model_name || "gpt-4o",
-              api_key: "", // Don't set keys from API for security
+              api_key: data.api_key || "",
               instructions: data.instructions || "",
               tools: data.tools || [],
               skills: data.skills || [],
               knowledge_files: data.knowledge_files || [],
               embedding_provider: data.embedding_provider || "google",
               embedding_model: data.embedding_model || "text-embedding-004",
-              embedding_api_key: "",
+              embedding_api_key: data.embedding_api_key || "",
             });
-            
+
             setInitialKeys({
               api_key: data.api_key || "",
               embedding_api_key: data.embedding_api_key || ""
@@ -910,7 +821,7 @@ function CreateAgentContent() {
 
   const handleDeleteConnection = async (dsId: string) => {
     if (!confirm("Bạn có chắc chắn muốn xóa kết nối này? Toàn bộ tri thức liên quan trong Đồ thị sẽ bị xóa sạch.")) return;
-    
+
     try {
       const res = await fetchWithAuth(`/connections/${dsId}`, { method: "DELETE" });
       if (res.ok) {
@@ -1088,7 +999,6 @@ function CreateAgentContent() {
 
       if (!res.ok) throw new Error("Save failed");
 
-      addNotification("success", "Thành công", `Đã ${agentId ? "cập nhật" : "tạo mới"} Agent thành công!`);
       setIsDirty(false); // Reset dirty state after successful save
 
       if (!agentId) {
@@ -1121,9 +1031,12 @@ function CreateAgentContent() {
       {/* --- Left Side: Configuration --- */}
       <div className={cn(
         "flex-1 overflow-y-auto transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] custom-scrollbar",
-        showPreview ? "px-6 pt-0 pb-12" : "max-w-5xl mx-auto px-10 pt-0 pb-20"
+        showPreview ? "pl-8 pr-6 pt-0 pb-12" : "pl-10 pr-10 pt-0 pb-20"
       )}>
-        <div className="max-w-4xl mx-auto space-y-3 pt-5">
+        <div className={cn(
+          "space-y-3 pt-5 transition-all duration-500 mx-auto w-full",
+          "max-w-4xl"
+        )}>
           {/* Header Section */}
           <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
             <div className="space-y-1.5 flex-1">
@@ -1332,8 +1245,8 @@ function CreateAgentContent() {
                               setFormData({ ...formData, api_key: val });
                             }
                           }}
-                          placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                          className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50 pr-12 font-mono text-xs shadow-none"
+                          placeholder="Nhập API Key của bạn..."
+                          className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50 pr-24 font-mono text-xs shadow-none"
                         />
                         <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
                           {formData.api_key !== initialKeys.api_key && initialKeys.api_key.includes("****") && (
@@ -1426,8 +1339,8 @@ function CreateAgentContent() {
                               setFormData({ ...formData, embedding_api_key: val });
                             }
                           }}
-                          placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                          className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50 pr-12 font-mono text-xs shadow-none"
+                          placeholder="Nhập Embedding API Key..."
+                          className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50 pr-24 font-mono text-xs shadow-none"
                         />
                         <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
                           {formData.embedding_api_key !== initialKeys.embedding_api_key && initialKeys.embedding_api_key.includes("****") && (
@@ -1468,9 +1381,15 @@ function CreateAgentContent() {
                 </div>
               </div>
 
-              <div className="flex-1 grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6 min-h-0">
+              <div className={cn(
+                "flex-1 grid gap-6 min-h-0 transition-all duration-300",
+                (showPreview && previewWidth > 400) ? "grid-cols-1 overflow-y-auto custom-scrollbar pr-2" : "grid-cols-1 lg:grid-cols-[380px_1fr]"
+              )}>
                 {/* Left Side: Skill Library */}
-                <div className="flex flex-col min-h-0">
+                <div className={cn(
+                  "flex flex-col min-h-0 transition-all duration-300",
+                  (showPreview && previewWidth > 400) && "min-h-[400px] h-[400px]"
+                )}>
                   <Card className="rounded-[1rem] border shadow-xl bg-white/40 dark:bg-white/[0.02] backdrop-blur-2xl flex-1 flex flex-col overflow-hidden ring-1 ring-white/50 dark:ring-white/5">
                     <CardHeader className="px-5 py-4 border-b bg-muted/20">
                       <CardTitle className="text-[11px] font-bold text-foreground/60 uppercase tracking-widest">Thư viện Kỹ năng</CardTitle>
@@ -1680,7 +1599,10 @@ function CreateAgentContent() {
                 </div>
 
                 {/* Right Side: Markdown Preview */}
-                <div className="flex-1 flex flex-col min-w-0">
+                <div className={cn(
+                  "flex-1 flex flex-col min-w-0 transition-all duration-300",
+                  (showPreview && previewWidth > 400) && "min-h-[600px] mt-2"
+                )}>
                   <Card className="rounded-[1rem] flex-1 border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl flex flex-col overflow-hidden">
                     {previewSkill ? (
                       <>
@@ -1829,7 +1751,7 @@ function CreateAgentContent() {
               <section className="space-y-4">
                 <div className="flex items-center justify-between px-1">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-bold text-foreground/90">Công cụ hỗ trợ (Tools)</h2>
+                    <h2 className="text-lg font-bold text-foreground/90">Công cụ hỗ trợ</h2>
                   </div>
                   <Button
                     variant="ghost"
@@ -1980,136 +1902,136 @@ function CreateAgentContent() {
                                           THÊM MỚI
                                         </Button>
                                       </div>
-                                      
-                                        <div className="space-y-3">
-                                          {/* Dropdown Selection as "Add to list" */}
-                                          <div className="space-y-1.5">
-                                            <label className="text-[10px] font-bold uppercase opacity-50 ml-1">Thêm nguồn dữ liệu</label>
-                                            <Select
-                                              open={isDataSourceSelectOpen}
-                                              onOpenChange={setIsDataSourceSelectOpen}
-                                              value=""
-                                              onValueChange={(val) => {
-                                                const currentIds = toolObj.config?.datasource_ids || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id] : []);
-                                                if (currentIds.includes(val)) return;
-                                                
-                                                const nextIds = [...currentIds, val];
-                                                const newTools = formData.tools.map(t => t.name === "text2sql" ? { 
-                                                  ...t, 
-                                                  config: { 
-                                                    ...t.config, 
-                                                    datasource_ids: nextIds,
-                                                    datasource_id: nextIds[0] // Giữ lại để tương thích ngược nếu cần
-                                                  } 
-                                                } : t);
-                                                setFormData(prev => ({ ...prev, tools: newTools }));
-                                                if (agentId) {
-                                                  handleSave({ ...formData, tools: newTools });
-                                                }
-                                              }}
-                                            >
-                                              <SelectTrigger className="h-10 rounded-xl bg-background/50 border-muted-foreground/20 focus:ring-1 focus:ring-primary/30 text-xs font-bold shadow-sm">
-                                                <SelectValue placeholder="Chọn kết nối để thêm vào Agent..." />
-                                              </SelectTrigger>
-                                              <SelectContent className="rounded-xl border-muted-foreground/20 shadow-2xl">
-                                                {availableConnections.length > 0 ? (
-                                                  availableConnections.map(conn => {
-                                                    const isSelected = (toolObj.config?.datasource_ids || []).includes(conn.id);
-                                                    return (
-                                                      <SelectItem key={conn.id} value={conn.id} disabled={isSelected} className="text-xs font-medium rounded-lg">
-                                                        <div className="flex items-center gap-2">
-                                                          <Database className="w-3.5 h-3.5 text-muted-foreground/50" />
-                                                          {conn.name} ({conn.engine})
-                                                          {isSelected && <Badge className="ml-2 h-3.5 text-[8px] bg-primary/10 text-primary border-none">Đã chọn</Badge>}
-                                                        </div>
-                                                      </SelectItem>
-                                                    );
-                                                  })
-                                                ) : (
-                                                  <div className="p-4 text-center">
-                                                    <p className="text-[10px] text-muted-foreground mb-2">Chưa có kết nối nào.</p>
-                                                    <Button size="sm" variant="outline" className="h-7 text-[9px] font-bold rounded-lg" onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      setIsDataSourceSelectOpen(false);
-                                                      setShowAddConnection(true);
-                                                      setEditingConnectionId(null);
-                                                    }}>Tạo tại đây</Button>
-                                                  </div>
-                                                )}
-                                              </SelectContent>
-                                            </Select>
-                                          </div>
 
-                                          {/* List of Selected Connections */}
-                                          <div className="space-y-2">
-                                            {(toolObj.config?.datasource_ids || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id] : [])).map((dsId: string) => {
-                                              const selectedDs = availableConnections.find(c => c.id === dsId);
-                                              if (!selectedDs) return null;
-                                              
-                                              return (
-                                                <div key={dsId} className="p-3 bg-primary/[0.02] dark:bg-primary/[0.01] border border-primary/10 rounded-xl flex items-center justify-between shadow-sm animate-in slide-in-from-top-2 duration-300">
-                                                  <div className="flex items-center gap-3">
-                                                    <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-800 flex items-center justify-center border border-primary/10 shadow-sm">
-                                                      <Database className="w-5 h-5 text-primary" />
-                                                    </div>
-                                                    <div>
-                                                      <p className="text-xs font-bold text-foreground/80">{selectedDs.name}</p>
-                                                      <div className="flex items-center gap-2 mt-0.5">
-                                                        <Badge variant="outline" className="text-[8px] h-3.5 px-1.5 font-bold uppercase bg-primary/5 text-primary border-none">
-                                                          {selectedDs.engine}
-                                                        </Badge>
-                                                        <span className="text-[9px] text-muted-foreground font-medium opacity-60">
-                                                          {selectedDs.host}
-                                                        </span>
+                                      <div className="space-y-3">
+                                        {/* Dropdown Selection as "Add to list" */}
+                                        <div className="space-y-1.5">
+                                          <label className="text-[10px] font-bold uppercase opacity-50 ml-1">Thêm nguồn dữ liệu</label>
+                                          <Select
+                                            open={isDataSourceSelectOpen}
+                                            onOpenChange={setIsDataSourceSelectOpen}
+                                            value=""
+                                            onValueChange={(val) => {
+                                              const currentIds = toolObj.config?.datasource_ids || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id] : []);
+                                              if (currentIds.includes(val)) return;
+
+                                              const nextIds = [...currentIds, val];
+                                              const newTools = formData.tools.map(t => t.name === "text2sql" ? {
+                                                ...t,
+                                                config: {
+                                                  ...t.config,
+                                                  datasource_ids: nextIds,
+                                                  datasource_id: nextIds[0] // Giữ lại để tương thích ngược nếu cần
+                                                }
+                                              } : t);
+                                              setFormData(prev => ({ ...prev, tools: newTools }));
+                                              if (agentId) {
+                                                handleSave({ ...formData, tools: newTools });
+                                              }
+                                            }}
+                                          >
+                                            <SelectTrigger className="h-10 rounded-xl bg-background/50 border-muted-foreground/20 focus:ring-1 focus:ring-primary/30 text-xs font-bold shadow-sm">
+                                              <SelectValue placeholder="Chọn kết nối để thêm vào Agent..." />
+                                            </SelectTrigger>
+                                            <SelectContent className="rounded-xl border-muted-foreground/20 shadow-2xl">
+                                              {availableConnections.length > 0 ? (
+                                                availableConnections.map(conn => {
+                                                  const isSelected = (toolObj.config?.datasource_ids || []).includes(conn.id);
+                                                  return (
+                                                    <SelectItem key={conn.id} value={conn.id} disabled={isSelected} className="text-xs font-medium rounded-lg">
+                                                      <div className="flex items-center gap-2">
+                                                        <Database className="w-3.5 h-3.5 text-muted-foreground/50" />
+                                                        {conn.name} ({conn.engine})
+                                                        {isSelected && <Badge className="ml-2 h-3.5 text-[8px] bg-primary/10 text-primary border-none">Đã chọn</Badge>}
                                                       </div>
-                                                    </div>
+                                                    </SelectItem>
+                                                  );
+                                                })
+                                              ) : (
+                                                <div className="p-4 text-center">
+                                                  <p className="text-[10px] text-muted-foreground mb-2">Chưa có kết nối nào.</p>
+                                                  <Button size="sm" variant="outline" className="h-7 text-[9px] font-bold rounded-lg" onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setIsDataSourceSelectOpen(false);
+                                                    setShowAddConnection(true);
+                                                    setEditingConnectionId(null);
+                                                  }}>Tạo tại đây</Button>
+                                                </div>
+                                              )}
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+
+                                        {/* List of Selected Connections */}
+                                        <div className="space-y-2">
+                                          {(toolObj.config?.datasource_ids || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id] : [])).map((dsId: string) => {
+                                            const selectedDs = availableConnections.find(c => c.id === dsId);
+                                            if (!selectedDs) return null;
+
+                                            return (
+                                              <div key={dsId} className="p-3 bg-primary/[0.02] dark:bg-primary/[0.01] border border-primary/10 rounded-xl flex items-center justify-between shadow-sm animate-in slide-in-from-top-2 duration-300">
+                                                <div className="flex items-center gap-3">
+                                                  <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-800 flex items-center justify-center border border-primary/10 shadow-sm">
+                                                    <Database className="w-5 h-5 text-primary" />
                                                   </div>
-                                                  <div className="flex items-center gap-1">
-                                                    <Button 
-                                                      variant="ghost" 
-                                                      size="icon" 
-                                                      className="h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
-                                                      onClick={() => handleEditConnection(selectedDs)}
-                                                      title="Sửa kết nối"
-                                                    >
-                                                      <Edit2 className="w-3.5 h-3.5" />
-                                                    </Button>
-                                                    <Button 
-                                                      variant="ghost" 
-                                                      size="icon" 
-                                                      className="h-8 w-8 rounded-lg hover:bg-destructive/10 hover:text-destructive transition-colors"
-                                                      onClick={() => handleDeleteConnection(selectedDs.id)}
-                                                      title="Xóa vĩnh viễn"
-                                                    >
-                                                      <Trash2 className="w-3.5 h-3.5" />
-                                                    </Button>
-                                                    <div className="w-[1px] h-3.5 bg-primary/10 mx-1" />
-                                                    <Button 
-                                                      variant="ghost" 
-                                                      size="icon" 
-                                                      className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-muted"
-                                                      onClick={() => {
-                                                        const currentIds = toolObj.config?.datasource_ids || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id] : []);
-                                                        const nextIds = currentIds.filter((id: string) => id !== dsId);
-                                                        const newTools = formData.tools.map(t => t.name === "text2sql" ? { 
-                                                          ...t, 
-                                                          config: { 
-                                                            ...t.config, 
-                                                            datasource_ids: nextIds,
-                                                            datasource_id: nextIds[0] || null
-                                                          } 
-                                                        } : t);
-                                                        setFormData(prev => ({ ...prev, tools: newTools }));
-                                                      }}
-                                                      title="Gỡ bỏ khỏi danh sách"
-                                                    >
-                                                      <X className="w-3.5 h-3.5" />
-                                                    </Button>
+                                                  <div>
+                                                    <p className="text-xs font-bold text-foreground/80">{selectedDs.name}</p>
+                                                    <div className="flex items-center gap-2 mt-0.5">
+                                                      <Badge variant="outline" className="text-[8px] h-3.5 px-1.5 font-bold uppercase bg-primary/5 text-primary border-none">
+                                                        {selectedDs.engine}
+                                                      </Badge>
+                                                      <span className="text-[9px] text-muted-foreground font-medium opacity-60">
+                                                        {selectedDs.host}
+                                                      </span>
+                                                    </div>
                                                   </div>
                                                 </div>
-                                              );
-                                            })}
-                                          </div>
+                                                <div className="flex items-center gap-1">
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
+                                                    onClick={() => handleEditConnection(selectedDs)}
+                                                    title="Sửa kết nối"
+                                                  >
+                                                    <Edit2 className="w-3.5 h-3.5" />
+                                                  </Button>
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 rounded-lg hover:bg-destructive/10 hover:text-destructive transition-colors"
+                                                    onClick={() => handleDeleteConnection(selectedDs.id)}
+                                                    title="Xóa vĩnh viễn"
+                                                  >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                  </Button>
+                                                  <div className="w-[1px] h-3.5 bg-primary/10 mx-1" />
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-muted"
+                                                    onClick={() => {
+                                                      const currentIds = toolObj.config?.datasource_ids || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id] : []);
+                                                      const nextIds = currentIds.filter((id: string) => id !== dsId);
+                                                      const newTools = formData.tools.map(t => t.name === "text2sql" ? {
+                                                        ...t,
+                                                        config: {
+                                                          ...t.config,
+                                                          datasource_ids: nextIds,
+                                                          datasource_id: nextIds[0] || null
+                                                        }
+                                                      } : t);
+                                                      setFormData(prev => ({ ...prev, tools: newTools }));
+                                                    }}
+                                                    title="Gỡ bỏ khỏi danh sách"
+                                                  >
+                                                    <X className="w-3.5 h-3.5" />
+                                                  </Button>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
                                         <p className="text-[9px] text-muted-foreground italic ml-1 opacity-60 leading-tight">Lưu ý: Agent sẽ dùng Embedding Model & API Key đã thiết lập ở tab "Cấu hình" để truy cập nguồn này.</p>
                                       </div>
                                     </div>
@@ -2159,7 +2081,7 @@ function CreateAgentContent() {
                   </div>
                   <div className="max-w-md mx-auto space-y-2">
                     <h3 className="text-2xl font-bold">Tự động hóa thông minh</h3>
-                    <p className="text-sm text-muted-foreground">Thiết lập các lịch trình hoặc sự kiện kích hoạt (triggers) để Agent tự động thực hiện công việc.</p>
+                    <p className="text-sm text-muted-foreground">Thiết lập các lịch trình hoặc sự kiện kích hoạt để Agent tự động thực hiện công việc.</p>
                   </div>
                   <Button className="rounded-[0.5rem] h-12 px-8 font-bold bg-primary text-white shadow-xl shadow-primary/20">Thiết lập Automation</Button>
                 </Card>
@@ -2171,160 +2093,30 @@ function CreateAgentContent() {
 
       {/* --- Right Side: Preview Chat --- */}
       {showPreview && (
-        <div className="w-[480px] p-4 h-full animate-in slide-in-from-right duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]">
-          <div className="w-full h-full flex flex-col bg-white dark:bg-zinc-950 border rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.05)] overflow-hidden relative">
-            {/* Chat Header */}
-            <div className="h-16 px-6 border-b flex items-center justify-between bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20">
-                  <Sparkles className="w-4 h-4 text-primary" />
-                </div>
-                <div>
-                  <p className="font-bold text-xs text-foreground/80">Thử nghiệm</p>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
-                    <p className="text-[9px] text-muted-foreground uppercase font-bold tracking-wide opacity-70">Môi trường mô phỏng</p>
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="rounded-xl h-8 w-8 hover:bg-muted" onClick={() => setMessages([messages[0]])}>
-                  <RotateCcw className="w-3.5 h-3.5 text-muted-foreground" />
-                </Button>
-                <Button variant="ghost" size="icon" className="rounded-xl h-8 w-8 hover:bg-destructive/10 hover:text-destructive" onClick={() => setShowPreview(false)}>
-                  <X className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </div>
-
-            {/* Chat Messages */}
-            <div
-              ref={chatContainerRef}
-              onScroll={handleScroll}
-              className="flex-1 overflow-y-auto p-6 space-y-6 bg-[#fbfbfd]/50 dark:bg-black/20 custom-scrollbar"
-            >
-              {messages.map((msg, i) => (
-                <div key={i} className={cn(
-                  "flex gap-3 transition-all duration-500 animate-in fade-in slide-in-from-bottom-4",
-                  msg.role === "user" ? "flex-row-reverse" : "flex-row"
-                )}>
-                  {/* Avatar */}
-                  <div className={cn(
-                    "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border shadow-sm",
-                    msg.role === "user"
-                      ? "bg-primary/10 border-primary/20"
-                      : "bg-purple-500/10 border-purple-500/20"
-                  )}>
-                    {msg.role === "user" ? (
-                      <Users className="w-4 h-4 text-primary" />
-                    ) : (
-                      <Bot className="w-4 h-4 text-purple-600" />
-                    )}
-                  </div>
-
-                  {/* Message Bubble */}
-                  <div className={cn(
-                    "max-w-[85%] px-5 py-3 text-[13px] shadow-sm transition-all prose prose-sm dark:prose-invert prose-p:leading-relaxed prose-pre:bg-secondary/50 prose-pre:border prose-pre:border-border",
-                    msg.role === "user"
-                      ? "bg-primary text-white rounded-[1.2rem] rounded-tr-none font-medium prose-p:text-white prose-strong:text-white prose-headings:text-white"
-                      : "bg-white dark:bg-zinc-900 border border-muted/30 rounded-[1.2rem] rounded-tl-none text-foreground/80 leading-relaxed markdown-preview"
-                  )}>
-                    {msg.thinking && (
-                      <div className="mb-4 text-[11px] text-muted-foreground/70 pl-0 py-1 bg-transparent not-prose">
-                        <details className="group" open={!msg.done}>
-                          <summary className="cursor-pointer list-none flex items-center gap-1.5 font-bold hover:text-primary transition-colors select-none">
-                            <ChevronRight className="w-3 h-3 group-open:rotate-90 transition-transform" />
-                            {msg.done ? "Đã phân tích xong" : "Đang lập luận..."}
-                          </summary>
-                          <div className="mt-2 text-[10px] leading-relaxed italic opacity-80 whitespace-pre-wrap font-medium">
-                            {msg.thinking}
-                          </div>
-                        </details>
-                      </div>
-                    )}
-
-                    {msg.status && !msg.done && (
-                      <div className="flex items-center gap-2 mb-2 text-[10px] text-primary font-bold animate-pulse">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        <span>{msg.status}</span>
-                      </div>
-                    )}
-
-                    {msg.content ? (
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-                        {msg.content}
-                      </ReactMarkdown>
-                    ) : (
-                      msg.role === "assistant" && i === messages.length - 1 && !msg.status ? (
-                        <div className="flex gap-1 py-1">
-                          <div className="w-1.5 h-1.5 bg-muted-foreground/30 rounded-full animate-bounce" />
-                          <div className="w-1.5 h-1.5 bg-muted-foreground/30 rounded-full animate-bounce [animation-delay:0.2s]" />
-                          <div className="w-1.5 h-1.5 bg-muted-foreground/30 rounded-full animate-bounce [animation-delay:0.4s]" />
-                        </div>
-                      ) : null
-                    )}
-
-                    {msg.interrupt && (
-                      <div className="mt-4 p-4 bg-amber-500/10 rounded-2xl border border-amber-500/20 space-y-3 not-prose">
-                        <div className="flex items-center gap-2 text-amber-600 font-bold text-[10px] uppercase tracking-wider">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Yêu cầu phê duyệt công cụ</span>
-                        </div>
-                        <p className="text-xs text-foreground font-bold">{msg.interrupt.message}</p>
-                        <div className="bg-black/5 dark:bg-white/5 p-3 rounded-xl border border-black/5">
-                          <p className="text-[9px] font-mono opacity-60 uppercase mb-1 font-bold">Đối số (Arguments):</p>
-                          <pre className="text-[10px] font-mono whitespace-pre-wrap overflow-x-auto max-h-32 custom-scrollbar opacity-80">
-                            {JSON.stringify(msg.interrupt.tool_args, null, 2)}
-                          </pre>
-                        </div>
-                        <div className="flex gap-2 pt-1">
-                          <Button 
-                            size="sm" 
-                            className="flex-1 rounded-xl bg-primary text-white font-bold h-9 shadow-lg shadow-primary/20"
-                            onClick={() => handleResume(true)}
-                          >
-                            Đồng ý thực thi
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            variant="outline"
-                            className="flex-1 rounded-xl border-muted-foreground/20 font-bold h-9 bg-background"
-                            onClick={() => handleResume(false)}
-                          >
-                            Từ chối
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Chat Input */}
-            <div className="p-5 bg-white dark:bg-zinc-950 border-t">
-              <div className="relative group">
-                <Input
-                  placeholder={agentId ? "Nhắn tin thử nghiệm..." : "Vui lòng lưu Agent để bắt đầu trò chuyện"}
-                  disabled={!agentId}
-                  className="rounded-2xl pr-12 h-12 border-2 border-muted-foreground/10 focus:border-primary/40 bg-muted/5 transition-all shadow-none disabled:opacity-50"
-                  onKeyDown={async (e) => {
-                    if (e.key === "Enter" && e.currentTarget.value && agentId) {
-                      handleChat(e.currentTarget.value);
-                      e.currentTarget.value = "";
-                    }
-                  }}
-                />
-                <Button size="icon" className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-xl bg-primary shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all">
-                  <Send className="w-3.5 h-3.5 text-white" />
-                </Button>
-              </div>
-              <p className="text-[9px] text-center text-muted-foreground mt-4 font-bold opacity-40 uppercase tracking-wide">
-                {agentId ? "Enter để bắt đầu hội thoại" : "Cần lưu Agent trước khi thử nghiệm"}
-              </p>
-            </div>
+        <div
+          style={{ width: `${previewWidth}px` }}
+          className={cn(
+            "p-4 h-full relative transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] shrink-0",
+            isResizing && "transition-none" // Tắt animation khi đang kéo để mượt
+          )}
+        >
+          {/* Resize Handle - Edge Left */}
+          <div
+            onMouseDown={startResizing}
+            className={cn(
+              "absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-[100] group",
+              isResizing ? "bg-primary/20" : "hover:bg-primary/10"
+            )}
+          >
+            <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 w-1 h-8 rounded-full bg-muted-foreground/20 group-hover:bg-primary/40 transition-colors" />
           </div>
+
+          <ChatInterface
+            agentId={agentId}
+            agentName={formData.name}
+            isEmbed={true}
+            onClose={() => setShowPreview(false)}
+          />
         </div>
       )}
 
@@ -2587,7 +2379,7 @@ function CreateAgentContent() {
                   <Settings className="w-3.5 h-3.5 text-primary" />
                   <label className="text-[11px] font-bold uppercase tracking-widest text-foreground">Cấu hình tham số</label>
                 </div>
-                
+
                 <div className="grid grid-cols-1 gap-5 p-5 bg-muted/20 rounded-2xl border border-muted-foreground/10">
                   {editingTool.info.supported_params.map((param: any) => (
                     <div key={param.key} className="space-y-2">
@@ -2595,10 +2387,10 @@ function CreateAgentContent() {
                         <label className="text-xs font-bold text-foreground/80 ml-1">{param.label}</label>
                         <span className="text-[10px] font-mono text-muted-foreground opacity-50 uppercase">{param.key}</span>
                       </div>
-                      
+
                       {param.type === "select" ? (
-                        <Select 
-                          value={editingTool.params?.[param.key] || param.default} 
+                        <Select
+                          value={editingTool.params?.[param.key] || param.default}
                           onValueChange={(val) => {
                             const currentParams = editingTool.params || {};
                             setEditingTool({ ...editingTool, params: { ...currentParams, [param.key]: val } });
@@ -2616,7 +2408,7 @@ function CreateAgentContent() {
                           </SelectContent>
                         </Select>
                       ) : (
-                        <Input 
+                        <Input
                           type={param.type === "number" ? "number" : "text"}
                           placeholder={param.desc || `Nhập ${param.label.toLowerCase()}...`}
                           value={editingTool.params?.[param.key] ?? param.default}
@@ -2649,7 +2441,7 @@ function CreateAgentContent() {
                     <label className="text-xs font-bold text-foreground/80">Cần phê duyệt (Human-in-the-loop)</label>
                     <p className="text-[10px] text-muted-foreground italic leading-none">Dừng lại và chờ bạn xác nhận trước khi thực thi công cụ.</p>
                   </div>
-                  <div 
+                  <div
                     className={cn(
                       "w-10 h-5 rounded-full p-1 cursor-pointer transition-colors duration-300",
                       editingTool?.params?.human_in_loop ? "bg-primary" : "bg-muted-foreground/20"
@@ -2672,7 +2464,7 @@ function CreateAgentContent() {
                     <label className="text-xs font-bold text-foreground/80">Giới hạn lượt gọi (Rate Limit)</label>
                     <span className="text-[10px] font-medium text-muted-foreground opacity-70">lần/phút</span>
                   </div>
-                  <Input 
+                  <Input
                     type="number"
                     placeholder="Không giới hạn"
                     value={editingTool?.params?.rate_limit || ""}
@@ -2694,7 +2486,7 @@ function CreateAgentContent() {
                     <label className="text-xs font-bold text-foreground/80">Giới hạn mỗi lượt (Run Limit)</label>
                     <span className="text-[10px] font-medium text-muted-foreground opacity-70">lần/tin nhắn</span>
                   </div>
-                  <Input 
+                  <Input
                     type="number"
                     placeholder="Không giới hạn"
                     value={editingTool?.params?.run_limit || ""}
@@ -2713,7 +2505,7 @@ function CreateAgentContent() {
                     <label className="text-xs font-bold text-foreground/80">Tổng giới hạn (Thread Limit)</label>
                     <span className="text-[10px] font-medium text-muted-foreground opacity-70">lần/phiên</span>
                   </div>
-                  <Input 
+                  <Input
                     type="number"
                     placeholder="Không giới hạn"
                     value={editingTool?.params?.thread_limit || ""}
@@ -2739,12 +2531,12 @@ function CreateAgentContent() {
             </Button>
             <Button
               onClick={() => {
-                const newTools = formData.tools.map(t => 
-                  t.name === editingTool.name ? { 
-                    ...t, 
-                    label: toolOverrideData.label, 
+                const newTools = formData.tools.map(t =>
+                  t.name === editingTool.name ? {
+                    ...t,
+                    label: toolOverrideData.label,
                     description: toolOverrideData.description,
-                    params: editingTool.params 
+                    params: editingTool.params
                   } : t
                 );
                 setFormData({ ...formData, tools: newTools });
