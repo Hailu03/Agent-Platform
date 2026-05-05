@@ -164,7 +164,7 @@
 }
 
 .markdown-preview pre {
-  @apply p-4 rounded-xl bg-zinc-950 text-zinc-100 font-mono text-[13px] mb-4 overflow-x-auto border border-white/10;
+  @apply p-4 rounded-xl bg-secondary/50 text-foreground font-mono text-[13px] mb-4 overflow-x-auto border border-border;
 }
 
 .markdown-preview pre code {
@@ -180,13 +180,61 @@
 }
 
 .markdown-preview table {
-  @apply w-full border-collapse mb-4;
-}
-
-.markdown-preview th, .markdown-preview td {
-  @apply border p-2 text-left;
+  @apply w-full border-collapse mb-6 overflow-hidden rounded-xl border border-muted-foreground/10 shadow-sm;
 }
 
 .markdown-preview th {
-  @apply bg-muted font-bold;
+  @apply bg-muted/80 backdrop-blur-sm font-black text-[11px] uppercase tracking-wider p-3 text-left border-b border-muted-foreground/10 text-muted-foreground;
+}
+
+.markdown-preview td {
+  @apply p-3 text-[13px] border-b border-muted-foreground/5 font-medium text-foreground/80;
+}
+
+.markdown-preview tr:last-child td {
+  @apply border-b-0;
+}
+
+.markdown-preview tr:nth-child(even) {
+  @apply bg-muted/20;
+}
+
+.markdown-preview tr:hover td {
+  @apply bg-primary/5 text-primary transition-colors;
+}
+
+/* Custom Details/Summary for SQL & Extra Info */
+.markdown-preview details {
+  @apply border border-border rounded-xl overflow-hidden mb-4 bg-secondary/30 transition-all duration-300;
+}
+
+.markdown-preview summary {
+  @apply p-4 font-bold cursor-pointer hover:bg-secondary/80 transition-all list-none flex items-center gap-3 text-muted-foreground hover:text-primary;
+}
+
+.markdown-preview summary::-webkit-details-marker {
+  display: none;
+}
+
+.markdown-preview summary::before {
+  content: '⬦';
+  @apply text-primary font-black transition-transform duration-300;
+}
+
+.markdown-preview details[open] {
+  @apply ring-1 ring-primary/20 shadow-lg shadow-primary/5;
+}
+
+.markdown-preview details[open] summary {
+  @apply border-b border-border bg-secondary/50 text-primary;
+}
+
+.markdown-preview details[open] summary::before {
+  content: '⬥';
+  @apply rotate-90;
+}
+
+.markdown-preview details > div, 
+.markdown-preview details > pre {
+  @apply m-0 rounded-none border-0;
 }

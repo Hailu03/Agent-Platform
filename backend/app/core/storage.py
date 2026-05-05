@@ -52,11 +52,19 @@ class StorageService:
             logger.error(f"Error getting file from MinIO: {e}")
             raise e
 
-    def get_presigned_url(self, object_name, expires_in=3600):
+    def get_presigned_url(self, object_name, expires_in=3600, response_type=None, disposition='inline'):
         try:
+            params = {
+                'Bucket': self.bucket_name, 
+                'Key': object_name,
+                'ResponseContentDisposition': disposition
+            }
+            if response_type:
+                params['ResponseContentType'] = response_type
+                
             url = self.s3.generate_presigned_url(
                 'get_object',
-                Params={'Bucket': self.bucket_name, 'Key': object_name},
+                Params=params,
                 ExpiresIn=expires_in
             )
             return url

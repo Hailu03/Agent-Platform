@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, Suspense } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import {
   Bot,
   Settings,
@@ -12,6 +13,7 @@ import {
   Network,
   Clock,
   Save,
+  Loader2,
   ArrowLeft,
   ChevronRight,
   Plus,
@@ -22,20 +24,24 @@ import {
   Eye,
   EyeOff,
   X,
+  Database,
+  Edit2,
   Terminal,
   Layers,
   Users,
   BrainCircuit,
   Zap,
   MoreHorizontal,
-  Edit2,
   Power,
   Mail,
   Search,
   Inbox,
   Tag,
   Reply,
-  Globe
+  Globe,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCcw,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -45,8 +51,17 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useNotifications } from "@/hooks/use-notifications";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -57,12 +72,11 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { cn } from "@/lib/utils";
-import { useNotifications } from "@/hooks/use-notifications";
 import { fetchWithAuth } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 const PROVIDER_MODELS: Record<string, { value: string, label: string }[]> = {
   openai: [
@@ -126,94 +140,126 @@ const EMBEDDING_MODELS: Record<string, { value: string, label: string }[]> = {
   ],
 };
 
+const getToolIcon = (name: string, category?: string, size: string = "w-4 h-4") => {
+  const n = name.toLowerCase();
+  const cn = size;
+  if (category === "Gmail" || n.includes("gmail")) {
+    const gmailRed = '#EA4335';
+    if (n.includes("tìm kiếm") || n.includes("search")) return <Search className={cn} style={{ color: gmailRed }} />;
+    if (n.includes("danh sách") || n.includes("list")) return <Inbox className={cn} style={{ color: gmailRed }} />;
+    if (n.includes("xem") || n.includes("đọc") || n.includes("read")) return <Eye className={cn} style={{ color: gmailRed }} />;
+    if (n.includes("gửi") || n.includes("send")) return <Send className={cn} style={{ color: gmailRed }} />;
+    if (n.includes("nháp") || n.includes("draft")) return <Edit2 className={cn} style={{ color: gmailRed }} />;
+    if (n.includes("nhãn") || n.includes("modify")) return <Tag className={cn} style={{ color: gmailRed }} />;
+    if (n.includes("trả lời") || n.includes("reply")) return <Reply className={cn} style={{ color: gmailRed }} />;
+    return <Mail className={cn} style={{ color: gmailRed }} />;
+  }
+  if (n.includes("tìm kiếm web") || n.includes("web_search")) return <Globe className={`${cn} text-blue-600`} />;
+  if (n.includes("search")) return <Search className={`${cn} text-blue-600`} />;
+  if (n.includes("interpreter") || n.includes("sql")) return <Cpu className={`${cn} text-indigo-600`} />;
+  if (n.includes("dall-e") || n.includes("content")) return <Sparkles className={`${cn} text-amber-600`} />;
+  if (n.includes("email")) return <Mail className={`${cn} text-red-600`} />;
+  return <Network className={`${cn} text-slate-600`} />;
+};
+
 function ToolItem({
   name,
   desc,
   active = false,
   category,
   onToggle,
-  onDelete
+  onDelete,
+  onSettings,
+  children
 }: {
   name: string,
   desc: string,
   active?: boolean,
   category?: string,
   onToggle?: () => void,
-  onDelete?: () => void
+  onDelete?: () => void,
+  onSettings?: () => void,
+  children?: React.ReactNode
 }) {
   const { addNotification } = useNotifications();
   const { user } = useAuth();
-  const getIcon = (name: string, category?: string) => {
-    const n = name.toLowerCase();
-    if (category === "Gmail" || n.includes("gmail")) {
-      if (n.includes("tìm kiếm") || n.includes("search")) return <Search className="w-4 h-4 text-red-500" />;
-      if (n.includes("danh sách") || n.includes("list")) return <Inbox className="w-4 h-4 text-red-500" />;
-      if (n.includes("xem") || n.includes("đọc") || n.includes("read")) return <Eye className="w-4 h-4 text-red-500" />;
-      if (n.includes("gửi") || n.includes("send")) return <Send className="w-4 h-4 text-red-500" />;
-      if (n.includes("nháp") || n.includes("draft")) return <Edit2 className="w-4 h-4 text-red-500" />;
-      if (n.includes("nhãn") || n.includes("modify")) return <Tag className="w-4 h-4 text-red-500" />;
-      if (n.includes("trả lời") || n.includes("reply")) return <Reply className="w-4 h-4 text-red-500" />;
-      return <Mail className="w-4 h-4 text-red-500" />;
-    }
-    if (n.includes("tìm kiếm web") || n.includes("web_search")) return <Globe className="w-4 h-4 text-blue-500" />;
-    if (n.includes("search")) return <Search className="w-4 h-4 text-blue-500" />;
-    if (n.includes("interpreter") || n.includes("sql")) return <Cpu className="w-4 h-4 text-purple-500" />;
-    if (n.includes("dall-e") || n.includes("content")) return <Sparkles className="w-4 h-4 text-amber-500" />;
-    if (n.includes("email")) return <Mail className="w-4 h-4 text-red-500" />;
-    return <Network className="w-4 h-4 text-emerald-500" />;
-  };
 
   return (
     <div className={cn(
-      "px-5 py-3 border-b last:border-b-0 flex items-center justify-between transition-all duration-300 group hover:bg-muted/30",
+      "border-b last:border-b-0 transition-all duration-300 group hover:bg-muted/30",
       !active && "opacity-60"
     )}>
-      <div className="flex items-center gap-4 flex-1 min-w-0">
-        <div className={cn(
-          "w-8 h-8 rounded-[0.5rem] flex items-center justify-center shrink-0 shadow-sm border",
-          active ? "bg-white dark:bg-white/10 border-primary/20" : "bg-muted border-transparent"
-        )}>
-          {getIcon(name, category)}
+      <div className="px-5 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-4 flex-1 min-w-0">
+          <div className={cn(
+            "w-8 h-8 rounded-[0.5rem] flex items-center justify-center shrink-0 shadow-sm border",
+            active ? "bg-white dark:bg-white/10 border-primary/20" : "bg-muted border-transparent"
+          )}>
+            {getToolIcon(name, category)}
+          </div>
+          <div className="flex-1 min-w-0 py-1">
+            <p className="text-[13px] font-bold truncate text-foreground/90">{name}</p>
+            <p className="text-[10px] text-muted-foreground font-medium leading-relaxed line-clamp-2 break-words mt-0.5">
+              {desc}
+            </p>
+          </div>
         </div>
-        <div className="flex-1 min-w-0 py-1">
-          <p className="text-[13px] font-bold truncate text-foreground/90">{name}</p>
-          <p className="text-[10px] text-muted-foreground font-medium leading-relaxed line-clamp-2 break-words mt-0.5">
-            {desc}
-          </p>
+
+        <div className="flex items-center gap-2">
+          {active && (
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] mr-2" />
+          )}
+
+          {active && onSettings && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-lg hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSettings();
+              }}
+              title="Cấu hình công cụ"
+            >
+              <Settings className="w-4 h-4" />
+            </Button>
+          )}
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 rounded-lg hover:bg-amber-500/10 text-muted-foreground hover:text-amber-600 transition-all"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle?.();
+            }}
+            title={active ? "Tạm tắt" : "Kích hoạt"}
+          >
+            <Power className="w-4 h-4" />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete?.();
+            }}
+            title="Xóa"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        {active && (
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] mr-2" />
-        )}
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 rounded-lg hover:bg-amber-500/10 text-muted-foreground hover:text-amber-600 transition-all"
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggle?.();
-          }}
-          title={active ? "Tạm tắt" : "Kích hoạt"}
-        >
-          <Power className="w-4 h-4" />
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete?.();
-          }}
-          title="Xóa"
-        >
-          <Trash2 className="w-4 h-4" />
-        </Button>
-      </div>
+      {active && children && (
+        <div className="px-5 pb-4 pt-1 animate-in fade-in slide-in-from-top-1 duration-300">
+          <div className="p-4 rounded-xl bg-muted/30 border border-muted-foreground/10 space-y-3">
+            {children}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -274,11 +320,24 @@ function CreateAgentContent() {
   const { user } = useAuth();
   const [showApiKey, setShowApiKey] = useState(false);
   const [showEmbeddingApiKey, setShowEmbeddingApiKey] = useState(false);
+  const [initialKeys, setInitialKeys] = useState({ api_key: "", embedding_api_key: "" });
 
   const [activeTab, setActiveTab] = useState("general");
   const [showPreview, setShowPreview] = useState(true);
   const [isOtherSpecialty, setIsOtherSpecialty] = useState(false);
-  const [messages, setMessages] = useState<{ role: string, content: string, thinking?: string, done?: boolean }[]>([
+  const [messages, setMessages] = useState<{ 
+    role: string, 
+    content: string, 
+    thinking?: string, 
+    done?: boolean,
+    status?: string,
+    interrupt?: {
+      action: string;
+      tool_name: string;
+      tool_args: any;
+      message: string;
+    } | null
+  }[]>([
     { role: "assistant", content: "Chào bạn! Tôi là AI Agent của bạn. Hãy thiết lập cấu hình bên trái rồi bắt đầu hội thoại nhé.", done: true }
   ]);
 
@@ -290,7 +349,7 @@ function CreateAgentContent() {
     model_name: "gpt-4o",
     api_key: "",
     instructions: "",
-    tools: [] as { name: string, is_active: boolean }[],
+    tools: [] as { name: string, is_active: boolean, config?: any }[],
     skills: [] as { name: string, is_active: boolean }[],
     knowledge_files: [] as { filename: string, url: string, object_name: string, status?: "pending" | "indexing" | "completed" | "error", task_id?: string }[],
 
@@ -303,6 +362,54 @@ function CreateAgentContent() {
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const isDataLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isLoadingData && isDataLoadedRef.current) {
+      setIsDirty(true);
+    }
+  }, [formData, isLoadingData]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+
+    const handleInternalNavigation = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const link = target.closest("a");
+
+      if (isDirty && link) {
+        const href = link.getAttribute("href");
+        // Bỏ qua các link nội bộ không làm mất trang hoặc link logout
+        if (href && !href.startsWith("#") && !href.startsWith("javascript:")) {
+          e.preventDefault();
+          setConfirmConfig({
+            open: true,
+            title: "Thay đổi chưa được lưu",
+            description: "Bạn có các thay đổi chưa lưu. Bạn có chắc muốn rời khỏi trang này không?",
+            onConfirm: () => {
+              setIsDirty(false); // Tắt dirty để có thể thoát
+              setTimeout(() => {
+                router.push(href);
+              }, 100);
+            }
+          });
+        }
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleInternalNavigation, true);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleInternalNavigation, true);
+    };
+  }, [isDirty, router]);
   const [availableTools, setAvailableTools] = useState<{ name: string, label?: string, description: string, icon: string, category?: string }[]>([]);
   const [availableSkills, setAvailableSkills] = useState<{ id: string, name: string, description: string, content: string, is_template: boolean, required_tools?: string[] }[]>([]);
   const [previewSkill, setPreviewSkill] = useState<any>(null);
@@ -311,7 +418,38 @@ function CreateAgentContent() {
   const [editingSkillId, setEditingSkillId] = useState<string | null>(null);
   const [isCreatingSkill, setIsCreatingSkill] = useState(false);
   const [skillTab, setSkillTab] = useState<"edit" | "preview">("edit");
-  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({ "Gmail": true, "Cơ bản": true });
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({ "Gmail": true, "Cơ bản": true, "Database": true });
+  const [availableConnections, setAvailableConnections] = useState<any[]>([]);
+  const [showAddConnection, setShowAddConnection] = useState(false);
+  const [isCreatingConnection, setIsCreatingConnection] = useState(false);
+  const [newConnectionData, setNewConnectionData] = useState({
+    name: "",
+    engine: "postgres",
+    host: "localhost",
+    port: 5432,
+    database: "",
+    username: "",
+    plain_password: "",
+    schema_name: "public",
+    extra_params: {} as any,
+    ssl: false,
+    instructions: "",
+    sql_samples: ""
+  });
+  const [editingConnectionId, setEditingConnectionId] = useState<string | null>(null);
+  const [isDataSourceSelectOpen, setIsDataSourceSelectOpen] = useState(false);
+  const [showToolConfig, setShowToolConfig] = useState(false);
+  const [editingTool, setEditingTool] = useState<any>(null);
+  const [toolOverrideData, setToolOverrideData] = useState({ label: "", description: "" });
+
+  const handleToolConfigChange = (toolName: string, config: any) => {
+    setFormData(prev => ({
+      ...prev,
+      tools: prev.tools.map(t => t.name === toolName ? { ...t, config: { ...t.config, ...config } } : t)
+    }));
+    setIsDirty(true);
+  };
+
 
   // Tự động chuyển đổi công cụ "Gmail" cũ sang bộ 7 công cụ mới
   useEffect(() => {
@@ -323,7 +461,7 @@ function CreateAgentContent() {
           const newGmailTools = gmailTools
             .filter(gt => !otherTools.find(ot => ot.name === gt.name))
             .map(gt => ({ name: gt.name, is_active: true }));
-          
+
           return {
             ...prev,
             tools: [...otherTools, ...newGmailTools]
@@ -359,7 +497,7 @@ function CreateAgentContent() {
 
       const created = await response.json();
       addNotification("success", "Thành công", `${editingSkillId ? "Cập nhật" : "Tạo"} kỹ năng mới thành công`);
-      
+
       if (editingSkillId) {
         setAvailableSkills(prev => prev.map(s => s.id === editingSkillId ? created : s));
       } else {
@@ -367,7 +505,7 @@ function CreateAgentContent() {
         // Tự động chọn skill vừa tạo cho agent
         setFormData(prev => ({ ...prev, skills: [...prev.skills, { name: created.name, is_active: true }] }));
       }
-      
+
       setPreviewSkill(created);
       setIsCreateSkillOpen(false);
       setEditingSkillId(null);
@@ -403,10 +541,114 @@ function CreateAgentContent() {
     setShouldAutoScroll(isAtBottom);
   };
 
+  // Hàm cập nhật form và đánh dấu là đã thay đổi
+  const updateFormData = (updater: (prev: any) => any) => {
+    setFormData(prev => {
+      const next = updater(prev);
+      setIsDirty(true);
+      return next;
+    });
+  };
   const scrollToBottom = () => {
     if (shouldAutoScroll) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
+  };
+
+  const handleChat = async (content: string, command: any = null) => {
+    if (!agentId) return;
+
+    if (!command) {
+      setMessages(prev => [...prev, { role: "user", content }]);
+      setMessages(prev => [...prev, { role: "assistant", content: "", done: false, status: "" }]);
+    } else {
+      setMessages(prev => {
+        const newMsgs = prev.slice();
+        const lastIdx = newMsgs.length - 1;
+        if (lastIdx >= 0) {
+          newMsgs[lastIdx] = { ...newMsgs[lastIdx], done: false, interrupt: null, status: "Đang xử lý..." };
+        }
+        return newMsgs;
+      });
+    }
+
+    try {
+      const response = await fetchWithAuth("/chat/stream", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          agent_id: agentId,
+          message: content,
+          command: command
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("Stream failed with status:", response.status, errorData);
+        throw new Error(`Stream failed: ${response.status} ${JSON.stringify(errorData)}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const lines = chunk.split("\n");
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const dataStr = line.replace("data: ", "").trim();
+              if (dataStr === "[DONE]") continue;
+
+              try {
+                const data = JSON.parse(dataStr);
+
+                setMessages(prev => {
+                  const newMsgs = prev.slice();
+                  const lastIdx = newMsgs.length - 1;
+                  if (lastIdx >= 0) {
+                    const last = newMsgs[lastIdx];
+                    // Tạo object MỚI thay vì mutate (tránh lỗi StrictMode double-invoke)
+                    newMsgs[lastIdx] = {
+                      ...last,
+                      ...(data.thinking ? { thinking: (last.thinking || "") + data.thinking } : {}),
+                      ...(data.content ? { content: (last.content || "") + data.content } : {}),
+                      ...(data.status ? { status: data.status } : {}),
+                      ...(data.interrupt ? { interrupt: data.interrupt, done: true } : {})
+                    };
+                  }
+                  return newMsgs;
+                });
+              } catch (e) {
+                console.error("Error parsing SSE data:", e);
+              }
+            }
+          }
+        }
+
+        setMessages(prev => {
+          const newMsgs = prev.slice();
+          const lastIdx = newMsgs.length - 1;
+          if (lastIdx >= 0 && !newMsgs[lastIdx].interrupt) {
+            newMsgs[lastIdx] = { ...newMsgs[lastIdx], done: true, status: "" };
+          }
+          return newMsgs;
+        });
+      }
+    } catch (error) {
+      console.error("Chat error:", error);
+      addNotification("error", "Lỗi hội thoại", "Không thể kết nối với Agent.");
+    }
+  };
+
+  const handleResume = (approved: boolean) => {
+    handleChat("", { approved });
   };
 
   useEffect(() => {
@@ -435,14 +677,27 @@ function CreateAgentContent() {
     fetchDependencies();
   }, []);
 
+  // 1. Khôi phục bản nháp từ LocalStorage (sau khi quay lại từ Google OAuth)
+  useEffect(() => {
+    const draft = localStorage.getItem("agent_form_draft");
+    if (draft) {
+      try {
+        const draftData = JSON.parse(draft);
+        setFormData(prev => ({ ...prev, ...draftData }));
+        localStorage.removeItem("agent_form_draft"); // Xóa ngay sau khi khôi phục
+        addNotification("success", "Khôi phục", "Đã khôi phục dữ liệu bạn đang nhập dở.");
+      } catch (e) {
+        console.error("Failed to parse draft:", e);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     console.log("DEBUG: AgentId detected:", agentId);
     if (agentId) {
       const fetchAgent = async () => {
         setIsLoadingData(true);
         const token = localStorage.getItem("access_token");
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-
         if (!token) {
           addNotification("error", "Lỗi xác thực", "Không tìm thấy Token đăng nhập. Vui lòng đăng nhập lại.");
           setIsLoadingData(false);
@@ -471,22 +726,18 @@ function CreateAgentContent() {
               specialty: data.specialty || "",
               model_provider: data.model_provider || "openai",
               model_name: data.model_name || "gpt-4o",
-              api_key: data.api_key || "",
+              api_key: "", // Don't set keys from API for security
               instructions: data.instructions || "",
-              tools: normalizeList(data.tools),
-              skills: normalizeList(data.skills),
-              knowledge_files: (data.knowledge_files || []).map((file: any) => {
-                if (typeof file === 'string') {
-                  return {
-                    filename: file.split('/').pop() || file,
-                    url: "",
-                    object_name: file
-                  };
-                }
-                return file;
-              }),
+              tools: data.tools || [],
+              skills: data.skills || [],
+              knowledge_files: data.knowledge_files || [],
               embedding_provider: data.embedding_provider || "google",
-              embedding_model: data.embedding_model || "models/embedding-001",
+              embedding_model: data.embedding_model || "text-embedding-004",
+              embedding_api_key: "",
+            });
+            
+            setInitialKeys({
+              api_key: data.api_key || "",
               embedding_api_key: data.embedding_api_key || ""
             });
 
@@ -517,6 +768,10 @@ function CreateAgentContent() {
           addNotification("error", "Lỗi kết nối", "Lỗi kết nối tới Server. Vui lòng kiểm tra Backend đang chạy.");
         } finally {
           setIsLoadingData(false);
+          // Đánh dấu đã load xong để bắt đầu theo dõi thay đổi (isDirty)
+          setTimeout(() => {
+            isDataLoadedRef.current = true;
+          }, 1000);
         }
       };
       fetchAgent();
@@ -525,17 +780,178 @@ function CreateAgentContent() {
     // Luôn fetch danh sách tool hỗ trợ từ server
     const fetchAvailableTools = async () => {
       try {
-        const res = await fetchWithAuth("/agents/tools/available");
-        if (res.ok) {
-          const data = await res.json();
+        const [toolsRes, connRes] = await Promise.all([
+          fetchWithAuth("/agents/tools/available"),
+          fetchWithAuth("/connections")
+        ]);
+        if (toolsRes.ok) {
+          const data = await toolsRes.json();
           setAvailableTools(data);
         }
+        if (connRes.ok) {
+          const data = await connRes.json();
+          setAvailableConnections(data);
+        }
       } catch (error) {
-        console.error("Lỗi fetch tools:", error);
+        console.error("Lỗi fetch tools/connections:", error);
       }
     };
     fetchAvailableTools();
   }, [agentId]);
+
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const handleTestConnection = async () => {
+    setIsTestingConnection(true);
+    try {
+      const res = await fetchWithAuth("/connections/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newConnectionData)
+      });
+      const data = await res.json();
+      if (data.success) {
+        addNotification("success", "Kết nối thành công!", `Độ trễ: ${data.latency_ms}ms`);
+      } else {
+        addNotification("error", "Kết nối thất bại", data.error);
+      }
+    } catch (error) {
+      addNotification("error", "Lỗi", "Không thể kết nối tới server thử nghiệm.");
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
+  const [indexingTask, setIndexingTask] = useState<{ id: string; status: string } | null>(null);
+
+  const startPollingIndexing = (taskId: string) => {
+    setIndexingTask({ id: taskId, status: "processing" });
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetchWithAuth(`/agents/tasks/${taskId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "SUCCESS") {
+            clearInterval(interval);
+            setIndexingTask({ id: taskId, status: "completed" });
+            addNotification("success", "Hoàn tất", "Đã lập chỉ mục nguồn dữ liệu thành công.");
+            // Refresh danh sách connections
+            const connRes = await fetchWithAuth("/connections");
+            if (connRes.ok) {
+              const data = await connRes.json();
+              setAvailableConnections(data);
+            }
+            // Đóng sau 1.5s
+            setTimeout(() => {
+              setShowAddConnection(false);
+              setIndexingTask(null);
+            }, 1500);
+          } else if (data.status === "FAILURE") {
+            clearInterval(interval);
+            setIndexingTask({ id: taskId, status: "error" });
+            addNotification("error", "Lỗi Indexing", "Không thể trích xuất kiến thức.");
+          }
+        }
+      } catch (error) {
+        console.error("Polling error:", error);
+        clearInterval(interval);
+      }
+    }, 2000);
+  };
+
+  const handleCreateConnection = async () => {
+    setIsCreatingConnection(true);
+    const url = editingConnectionId ? `/connections/${editingConnectionId}` : "/connections";
+    const method = editingConnectionId ? "PATCH" : "POST";
+
+    try {
+      const res = await fetchWithAuth(url, {
+        method: method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...newConnectionData,
+          extra_params: {
+            ...newConnectionData.extra_params,
+            agent_id: agentId || "temp",
+            embedding_provider: formData.embedding_provider,
+            embedding_model: formData.embedding_model,
+            embedding_api_key: formData.embedding_api_key,
+            chat_api_key: formData.api_key,
+            chat_provider: formData.model_provider,
+            model_name: formData.model_name
+          }
+        })
+      });
+      if (res.ok) {
+        const result = await res.json();
+        addNotification("success", "Thành công", editingConnectionId ? "Đã cập nhật kết nối." : "Đã khởi tạo kết nối. Đang lập chỉ mục...");
+
+        // Tự động gán cho tool text2sql
+        setFormData(prev => ({
+          ...prev,
+          tools: prev.tools.map(t => t.name === "text2sql" ? { ...t, config: { ...t.config, datasource_id: result.id } } : t)
+        }));
+
+        if (result.task_id) {
+          startPollingIndexing(result.task_id);
+        } else {
+          setShowAddConnection(false);
+          setEditingConnectionId(null);
+        }
+      } else {
+        const err = await res.json();
+        addNotification("error", "Lỗi", err.detail || "Không thể lưu kết nối.");
+      }
+    } catch (error) {
+      addNotification("error", "Lỗi", "Lỗi mạng hoặc server.");
+    } finally {
+      setIsCreatingConnection(false);
+    }
+  };
+
+  const handleDeleteConnection = async (dsId: string) => {
+    if (!confirm("Bạn có chắc chắn muốn xóa kết nối này? Toàn bộ tri thức liên quan trong Đồ thị sẽ bị xóa sạch.")) return;
+    
+    try {
+      const res = await fetchWithAuth(`/connections/${dsId}`, { method: "DELETE" });
+      if (res.ok) {
+        addNotification("success", "Đã xóa", "Đã xóa kết nối và dọn dẹp tri thức thành công.");
+        // Refresh list
+        const connRes = await fetchWithAuth("/connections");
+        if (connRes.ok) {
+          const data = await connRes.json();
+          setAvailableConnections(data);
+        }
+        // Nếu datasource đang được chọn thì bỏ chọn
+        if (formData.tools.find(t => t.name === "text2sql")?.config?.datasource_id === dsId) {
+          handleToolConfigChange("text2sql", { datasource_id: null });
+        }
+      } else {
+        addNotification("error", "Lỗi", "Không thể xóa kết nối.");
+      }
+    } catch (error) {
+      addNotification("error", "Lỗi", "Lỗi kết nối server.");
+    }
+  };
+
+  const handleEditConnection = (ds: any) => {
+    setNewConnectionData({
+      name: ds.name,
+      engine: ds.engine,
+      host: ds.host,
+      port: ds.port,
+      database: ds.database,
+      schema_name: ds.schema_name,
+      username: ds.username,
+      plain_password: "", // Không lấy lại password cũ vì lý do bảo mật
+      extra_params: ds.extra_params || {},
+      ssl: ds.ssl || false,
+      instructions: ds.instructions || "",
+      sql_samples: ds.sql_samples || ""
+    });
+    // Lưu ID để biết là đang update
+    setEditingConnectionId(ds.id);
+    setShowAddConnection(true);
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -611,12 +1027,24 @@ function CreateAgentContent() {
           const data = await res.json();
           if (data.status === "SUCCESS") {
             clearInterval(interval);
-            setFormData(prev => ({
-              ...prev,
-              knowledge_files: prev.knowledge_files.map(f =>
-                f.object_name === objectName ? { ...f, status: "completed" } : f
-              )
-            }));
+            setFormData(prev => {
+              const newFiles = prev.knowledge_files.map(f =>
+                f.object_name === objectName ? { ...f, status: "completed" as const } : f
+              );
+
+              // Auto-save knowledge files after indexing success
+              if (agentId) {
+                // Sử dụng setTimeout để đẩy handleSave ra khỏi render cycle của React
+                setTimeout(() => {
+                  handleSave({ ...prev, knowledge_files: newFiles });
+                }, 0);
+              }
+
+              return {
+                ...prev,
+                knowledge_files: newFiles
+              };
+            });
             addNotification("success", "Indexing hoàn tất", `Tài liệu ${objectName.split('/').pop()} đã sẵn sàng.`);
           } else if (data.status === "FAILURE") {
             clearInterval(interval);
@@ -636,18 +1064,19 @@ function CreateAgentContent() {
     }, 3000);
   };
 
-  const handleSave = async () => {
-    if (!formData.name) {
+  const handleSave = async (customPayload?: any) => {
+    if (!formData.name && !customPayload?.name) {
       addNotification("warning", "Thiếu thông tin", "Vui lòng nhập tên Agent trước khi lưu.");
       return;
     }
 
     setIsSaving(true);
 
+    const baseData = customPayload || formData;
     const payload = {
-      ...formData,
-      tools: formData.tools.filter(t => t.name),
-      skills: formData.skills.filter(s => s.name)
+      ...baseData,
+      tools: (baseData.tools || []).filter((t: any) => t.name),
+      skills: (baseData.skills || []).filter((s: any) => s.name)
     };
 
     try {
@@ -660,6 +1089,7 @@ function CreateAgentContent() {
       if (!res.ok) throw new Error("Save failed");
 
       addNotification("success", "Thành công", `Đã ${agentId ? "cập nhật" : "tạo mới"} Agent thành công!`);
+      setIsDirty(false); // Reset dirty state after successful save
 
       if (!agentId) {
         const data = await res.json();
@@ -720,7 +1150,7 @@ function CreateAgentContent() {
               {/* Divider only if Test button is shown */}
               {!showPreview && <div className="w-[1px] h-3 bg-border mx-0.5" />}
               <Button
-                onClick={handleSave}
+                onClick={() => handleSave()}
                 disabled={isSaving || formData.knowledge_files.some(f => f.status === "indexing")}
                 className="rounded-[0.5rem] h-8 px-5 text-[10px] font-bold bg-primary text-white shadow-lg shadow-primary/20 hover:shadow-primary/30 hover:-translate-y-0.5 active:translate-y-0 transition-all uppercase tracking-wide disabled:opacity-50"
               >
@@ -753,7 +1183,6 @@ function CreateAgentContent() {
             <TabsContent value="general" className="space-y-2 animate-in fade-in duration-200 min-h-[500px]">
               <section className="space-y-2">
                 <div className="flex items-center gap-2 px-1">
-                  <div className="w-1.5 h-6 bg-primary rounded-full" />
                   <h2 className="text-xl font-bold">Chi tiết trợ lý</h2>
                 </div>
 
@@ -835,7 +1264,6 @@ function CreateAgentContent() {
 
               <section className="space-y-2 pt-4">
                 <div className="flex items-center gap-2 px-1">
-                  <div className="w-1.5 h-6 bg-purple-500 rounded-full" />
                   <h2 className="text-xl font-bold">Chọn Model LLM</h2>
                 </div>
 
@@ -896,17 +1324,36 @@ function CreateAgentContent() {
                         <Input
                           type={showApiKey ? "text" : "password"}
                           value={formData.api_key}
-                          onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (formData.api_key?.includes("****") && val.length < formData.api_key.length) {
+                              setFormData({ ...formData, api_key: "" });
+                            } else {
+                              setFormData({ ...formData, api_key: val });
+                            }
+                          }}
                           placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                           className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50 pr-12 font-mono text-xs shadow-none"
                         />
-                        <button
-                          type="button"
-                          onClick={() => setShowApiKey(!showApiKey)}
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground/40 hover:text-primary/60 transition-colors"
-                        >
-                          {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
+                        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                          {formData.api_key !== initialKeys.api_key && initialKeys.api_key.includes("****") && (
+                            <button
+                              type="button"
+                              onClick={() => setFormData({ ...formData, api_key: initialKeys.api_key })}
+                              className="text-blue-500 hover:text-blue-600 transition-colors"
+                              title="Khôi phục Key cũ"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setShowApiKey(!showApiKey)}
+                            className="text-muted-foreground/40 hover:text-primary/60 transition-colors"
+                          >
+                            {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </CardContent>
@@ -915,7 +1362,6 @@ function CreateAgentContent() {
 
               <section className="space-y-2 pt-4">
                 <div className="flex items-center gap-2 px-1">
-                  <div className="w-1.5 h-6 bg-blue-500 rounded-full" />
                   <h2 className="text-xl font-bold">Chọn Embedding Model</h2>
                 </div>
 
@@ -972,17 +1418,36 @@ function CreateAgentContent() {
                         <Input
                           type={showEmbeddingApiKey ? "text" : "password"}
                           value={formData.embedding_api_key}
-                          onChange={(e) => setFormData({ ...formData, embedding_api_key: e.target.value })}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (formData.embedding_api_key?.includes("****") && val.length < formData.embedding_api_key.length) {
+                              setFormData({ ...formData, embedding_api_key: "" });
+                            } else {
+                              setFormData({ ...formData, embedding_api_key: val });
+                            }
+                          }}
                           placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                           className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50 pr-12 font-mono text-xs shadow-none"
                         />
-                        <button
-                          type="button"
-                          onClick={() => setShowEmbeddingApiKey(!showEmbeddingApiKey)}
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground/40 hover:text-primary/60 transition-colors"
-                        >
-                          {showEmbeddingApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
+                        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                          {formData.embedding_api_key !== initialKeys.embedding_api_key && initialKeys.embedding_api_key.includes("****") && (
+                            <button
+                              type="button"
+                              onClick={() => setFormData({ ...formData, embedding_api_key: initialKeys.embedding_api_key })}
+                              className="text-blue-500 hover:text-blue-600 transition-colors"
+                              title="Khôi phục Key cũ"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setShowEmbeddingApiKey(!showEmbeddingApiKey)}
+                            className="text-muted-foreground/40 hover:text-primary/60 transition-colors"
+                          >
+                            {showEmbeddingApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </CardContent>
@@ -994,7 +1459,6 @@ function CreateAgentContent() {
             <TabsContent value="intelligence" className="space-y-4 animate-in fade-in duration-300 h-[550px] flex flex-col overflow-hidden">
               <div className="flex items-center justify-between px-1 shrink-0">
                 <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-6 bg-blue-500 rounded-full" />
                   <h2 className="text-lg font-bold">Kỹ Năng Chuyên Biệt</h2>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1031,8 +1495,8 @@ function CreateAgentContent() {
                               <DropdownMenuSeparator />
                               {availableSkills.filter(s => s.is_template && !formData.skills.some(fs => fs.name === s.name)).length > 0 ? (
                                 availableSkills.filter(s => s.is_template && !formData.skills.some(fs => fs.name === s.name)).map(skill => (
-                                  <DropdownMenuItem 
-                                    key={skill.id} 
+                                  <DropdownMenuItem
+                                    key={skill.id}
                                     className="flex flex-col items-start gap-1 p-3 cursor-pointer group"
                                     onClick={() => {
                                       // Logic nạp tool tự động
@@ -1044,8 +1508,8 @@ function CreateAgentContent() {
                                           }
                                         });
                                       }
-                                      setFormData(prev => ({ 
-                                        ...prev, 
+                                      setFormData(prev => ({
+                                        ...prev,
                                         skills: [...prev.skills, { name: skill.name, is_active: true }],
                                         tools: newTools
                                       }));
@@ -1068,7 +1532,7 @@ function CreateAgentContent() {
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
-                        
+
                         {/* Only show added templates */}
                         {availableSkills.filter(s => s.is_template && formData.skills.some(fs => fs.name === s.name)).map(skill => {
                           const isActive = formData.skills.some(s => s.name === skill.name);
@@ -1221,9 +1685,9 @@ function CreateAgentContent() {
                     {previewSkill ? (
                       <>
                         <CardHeader className="px-8 py-6 border-b bg-muted/5 shrink-0 relative">
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             className="absolute right-4 top-4 w-8 h-8 rounded-full hover:bg-destructive/10 hover:text-destructive transition-all"
                             onClick={() => setPreviewSkill(null)}
                           >
@@ -1240,7 +1704,7 @@ function CreateAgentContent() {
                             </div>
                             <p className="text-[13px] text-muted-foreground leading-relaxed font-medium line-clamp-2">{previewSkill.description || "Nội dung chỉ dẫn thực thi kỹ năng."}</p>
                           </div>
-                          
+
                           {/* Apply Skill Button (Removed as per user request, selection is now via Plus picker) */}
                           <div className="shrink-0 flex flex-col items-end gap-2">
                             {previewSkill.required_tools && previewSkill.required_tools.length > 0 && (
@@ -1275,7 +1739,6 @@ function CreateAgentContent() {
 
               <section className="space-y-4 pt-4">
                 <div className="flex items-center gap-2 px-1">
-                  <div className="w-1.5 h-6 bg-emerald-500 rounded-full" />
                   <h2 className="text-xl font-bold">Cơ sở Tri thức</h2>
                 </div>
                 <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
@@ -1366,7 +1829,6 @@ function CreateAgentContent() {
               <section className="space-y-4">
                 <div className="flex items-center justify-between px-1">
                   <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-5 bg-blue-500 rounded-full" />
                     <h2 className="text-lg font-bold text-foreground/90">Công cụ hỗ trợ (Tools)</h2>
                   </div>
                   <Button
@@ -1380,7 +1842,7 @@ function CreateAgentContent() {
                 <div className="space-y-6">
                   {(() => {
                     const toolMap = new Map(availableTools.map(t => [t.name, t]));
-                    
+
                     // Group tools by category
                     const groupedTools = formData.tools.reduce((acc, toolObj) => {
                       const toolInfo = toolMap.get(toolObj.name);
@@ -1405,14 +1867,14 @@ function CreateAgentContent() {
 
                     return Object.entries(groupedTools).map(([category, tools]) => (
                       <div key={category} className="space-y-3">
-                        <button 
+                        <button
                           onClick={() => setExpandedCategories(prev => ({ ...prev, [`main-${category}`]: !prev[`main-${category}`] }))}
                           className="flex items-center justify-between w-full px-2 group/cat"
                         >
                           <div className="flex items-center gap-2">
                             <h3 className="text-[11px] font-black uppercase tracking-widest text-muted-foreground/60 group-hover/cat:text-blue-500 transition-colors">{category}</h3>
                             <Badge variant="outline" className="text-[8px] h-3.5 px-1.5 opacity-50">{tools.length}</Badge>
-                            
+
                             {category === "Gmail" && !user?.is_google_connected && (
                               <Button
                                 variant="outline"
@@ -1458,33 +1920,201 @@ function CreateAgentContent() {
                               return (
                                 <ToolItem
                                   key={toolName}
-                                  name={toolInfo.label || toolInfo.name}
-                                  desc={toolInfo.description}
+                                  name={toolObj.label || toolInfo.label || toolInfo.name}
+                                  desc={toolObj.description || toolInfo.description}
                                   active={toolObj.is_active}
                                   category={category}
                                   onToggle={() => {
-                                    setFormData(prev => ({
-                                      ...prev,
-                                      tools: prev.tools.map(t =>
-                                        t.name === toolName ? { ...t, is_active: !t.is_active } : t
-                                      )
-                                    }));
+                                    const newTools = formData.tools.map(t =>
+                                      t.name === toolName ? { ...t, is_active: !t.is_active } : t
+                                    );
+                                    setFormData(prev => ({ ...prev, tools: newTools }));
+                                    if (agentId) {
+                                      handleSave({ ...formData, tools: newTools });
+                                    }
                                   }}
                                   onDelete={() => {
                                     setConfirmConfig({
                                       open: true,
                                       title: "Xác nhận xóa",
-                                      description: `Bạn có chắc muốn gỡ bỏ công cụ ${toolInfo.label || toolName}?`,
+                                      description: `Bạn có chắc muốn gỡ bỏ công cụ ${toolObj.label || toolInfo.label || toolName}?`,
                                       onConfirm: () => {
-                                        setFormData(prev => ({
-                                          ...prev,
-                                          tools: prev.tools.filter(t => t.name !== toolName)
-                                        }));
-                                        addNotification("info", "Đã gỡ", `Đã gỡ công cụ ${toolInfo.label || toolName}`);
+                                        const newTools = formData.tools.filter(t => t.name !== toolName);
+                                        setFormData(prev => ({ ...prev, tools: newTools }));
+                                        if (agentId) {
+                                          handleSave({ ...formData, tools: newTools });
+                                        }
+                                        addNotification("info", "Đã gỡ", `Đã gỡ công cụ ${toolObj.label || toolInfo.label || toolName}`);
                                       }
                                     });
                                   }}
-                                />
+                                  onSettings={() => {
+                                    setEditingTool(toolObj);
+                                    setToolOverrideData({
+                                      label: toolObj.label || toolInfo.label || toolName,
+                                      description: toolObj.description || toolInfo.description
+                                    });
+                                    setShowToolConfig(true);
+                                  }}
+                                >
+                                  {toolName === "text2sql" && (
+                                    <div className="space-y-4">
+                                      {/* Tool Sub-Header with Add Action */}
+                                      <div className="flex items-center justify-between px-1">
+                                        <div className="flex items-center gap-2">
+                                          <Network className="w-3.5 h-3.5 text-primary" />
+                                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-primary/70">Kết nối cơ sở dữ liệu</p>
+                                        </div>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-7 px-2 rounded-lg text-[9px] font-bold text-primary hover:bg-primary/5 transition-all group"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setIsDataSourceSelectOpen(false);
+                                            setShowAddConnection(true);
+                                            setEditingConnectionId(null);
+                                          }}
+                                        >
+                                          <Plus className="w-3 h-3 mr-1 group-hover:rotate-90 transition-transform" />
+                                          THÊM MỚI
+                                        </Button>
+                                      </div>
+                                      
+                                        <div className="space-y-3">
+                                          {/* Dropdown Selection as "Add to list" */}
+                                          <div className="space-y-1.5">
+                                            <label className="text-[10px] font-bold uppercase opacity-50 ml-1">Thêm nguồn dữ liệu</label>
+                                            <Select
+                                              open={isDataSourceSelectOpen}
+                                              onOpenChange={setIsDataSourceSelectOpen}
+                                              value=""
+                                              onValueChange={(val) => {
+                                                const currentIds = toolObj.config?.datasource_ids || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id] : []);
+                                                if (currentIds.includes(val)) return;
+                                                
+                                                const nextIds = [...currentIds, val];
+                                                const newTools = formData.tools.map(t => t.name === "text2sql" ? { 
+                                                  ...t, 
+                                                  config: { 
+                                                    ...t.config, 
+                                                    datasource_ids: nextIds,
+                                                    datasource_id: nextIds[0] // Giữ lại để tương thích ngược nếu cần
+                                                  } 
+                                                } : t);
+                                                setFormData(prev => ({ ...prev, tools: newTools }));
+                                                if (agentId) {
+                                                  handleSave({ ...formData, tools: newTools });
+                                                }
+                                              }}
+                                            >
+                                              <SelectTrigger className="h-10 rounded-xl bg-background/50 border-muted-foreground/20 focus:ring-1 focus:ring-primary/30 text-xs font-bold shadow-sm">
+                                                <SelectValue placeholder="Chọn kết nối để thêm vào Agent..." />
+                                              </SelectTrigger>
+                                              <SelectContent className="rounded-xl border-muted-foreground/20 shadow-2xl">
+                                                {availableConnections.length > 0 ? (
+                                                  availableConnections.map(conn => {
+                                                    const isSelected = (toolObj.config?.datasource_ids || []).includes(conn.id);
+                                                    return (
+                                                      <SelectItem key={conn.id} value={conn.id} disabled={isSelected} className="text-xs font-medium rounded-lg">
+                                                        <div className="flex items-center gap-2">
+                                                          <Database className="w-3.5 h-3.5 text-muted-foreground/50" />
+                                                          {conn.name} ({conn.engine})
+                                                          {isSelected && <Badge className="ml-2 h-3.5 text-[8px] bg-primary/10 text-primary border-none">Đã chọn</Badge>}
+                                                        </div>
+                                                      </SelectItem>
+                                                    );
+                                                  })
+                                                ) : (
+                                                  <div className="p-4 text-center">
+                                                    <p className="text-[10px] text-muted-foreground mb-2">Chưa có kết nối nào.</p>
+                                                    <Button size="sm" variant="outline" className="h-7 text-[9px] font-bold rounded-lg" onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      setIsDataSourceSelectOpen(false);
+                                                      setShowAddConnection(true);
+                                                      setEditingConnectionId(null);
+                                                    }}>Tạo tại đây</Button>
+                                                  </div>
+                                                )}
+                                              </SelectContent>
+                                            </Select>
+                                          </div>
+
+                                          {/* List of Selected Connections */}
+                                          <div className="space-y-2">
+                                            {(toolObj.config?.datasource_ids || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id] : [])).map((dsId: string) => {
+                                              const selectedDs = availableConnections.find(c => c.id === dsId);
+                                              if (!selectedDs) return null;
+                                              
+                                              return (
+                                                <div key={dsId} className="p-3 bg-primary/[0.02] dark:bg-primary/[0.01] border border-primary/10 rounded-xl flex items-center justify-between shadow-sm animate-in slide-in-from-top-2 duration-300">
+                                                  <div className="flex items-center gap-3">
+                                                    <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-800 flex items-center justify-center border border-primary/10 shadow-sm">
+                                                      <Database className="w-5 h-5 text-primary" />
+                                                    </div>
+                                                    <div>
+                                                      <p className="text-xs font-bold text-foreground/80">{selectedDs.name}</p>
+                                                      <div className="flex items-center gap-2 mt-0.5">
+                                                        <Badge variant="outline" className="text-[8px] h-3.5 px-1.5 font-bold uppercase bg-primary/5 text-primary border-none">
+                                                          {selectedDs.engine}
+                                                        </Badge>
+                                                        <span className="text-[9px] text-muted-foreground font-medium opacity-60">
+                                                          {selectedDs.host}
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                  <div className="flex items-center gap-1">
+                                                    <Button 
+                                                      variant="ghost" 
+                                                      size="icon" 
+                                                      className="h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
+                                                      onClick={() => handleEditConnection(selectedDs)}
+                                                      title="Sửa kết nối"
+                                                    >
+                                                      <Edit2 className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                    <Button 
+                                                      variant="ghost" 
+                                                      size="icon" 
+                                                      className="h-8 w-8 rounded-lg hover:bg-destructive/10 hover:text-destructive transition-colors"
+                                                      onClick={() => handleDeleteConnection(selectedDs.id)}
+                                                      title="Xóa vĩnh viễn"
+                                                    >
+                                                      <Trash2 className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                    <div className="w-[1px] h-3.5 bg-primary/10 mx-1" />
+                                                    <Button 
+                                                      variant="ghost" 
+                                                      size="icon" 
+                                                      className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-muted"
+                                                      onClick={() => {
+                                                        const currentIds = toolObj.config?.datasource_ids || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id] : []);
+                                                        const nextIds = currentIds.filter((id: string) => id !== dsId);
+                                                        const newTools = formData.tools.map(t => t.name === "text2sql" ? { 
+                                                          ...t, 
+                                                          config: { 
+                                                            ...t.config, 
+                                                            datasource_ids: nextIds,
+                                                            datasource_id: nextIds[0] || null
+                                                          } 
+                                                        } : t);
+                                                        setFormData(prev => ({ ...prev, tools: newTools }));
+                                                      }}
+                                                      title="Gỡ bỏ khỏi danh sách"
+                                                    >
+                                                      <X className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        <p className="text-[9px] text-muted-foreground italic ml-1 opacity-60 leading-tight">Lưu ý: Agent sẽ dùng Embedding Model & API Key đã thiết lập ở tab "Cấu hình" để truy cập nguồn này.</p>
+                                      </div>
+                                    </div>
+                                  )}
+                                </ToolItem>
                               );
                             })}
                           </div>
@@ -1501,7 +2131,6 @@ function CreateAgentContent() {
               <section className="space-y-4">
                 <div className="flex items-center justify-between px-1">
                   <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-5 bg-amber-500 rounded-full" />
                     <h2 className="text-lg font-bold text-foreground/90">Hệ sinh thái Agent</h2>
                   </div>
                   <Button variant="ghost" className="rounded-lg h-8 px-3 text-[11px] font-bold text-primary hover:bg-primary/5 transition-all">
@@ -1522,7 +2151,6 @@ function CreateAgentContent() {
             <TabsContent value="automation" className="animate-in fade-in slide-in-from-bottom-2 duration-500">
               <section className="space-y-4">
                 <div className="flex items-center gap-2 px-1">
-                  <div className="w-1.5 h-6 bg-primary rounded-full" />
                   <h2 className="text-xl font-bold">Quy trình tự động</h2>
                 </div>
                 <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl p-16 text-center space-y-6">
@@ -1596,13 +2224,13 @@ function CreateAgentContent() {
 
                   {/* Message Bubble */}
                   <div className={cn(
-                    "max-w-[85%] px-5 py-3 text-[13px] shadow-sm transition-all prose prose-sm dark:prose-invert prose-p:leading-relaxed prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-white/10",
+                    "max-w-[85%] px-5 py-3 text-[13px] shadow-sm transition-all prose prose-sm dark:prose-invert prose-p:leading-relaxed prose-pre:bg-secondary/50 prose-pre:border prose-pre:border-border",
                     msg.role === "user"
                       ? "bg-primary text-white rounded-[1.2rem] rounded-tr-none font-medium prose-p:text-white prose-strong:text-white prose-headings:text-white"
-                      : "bg-white dark:bg-zinc-900 border border-muted/30 rounded-[1.2rem] rounded-tl-none text-foreground/80 leading-relaxed"
+                      : "bg-white dark:bg-zinc-900 border border-muted/30 rounded-[1.2rem] rounded-tl-none text-foreground/80 leading-relaxed markdown-preview"
                   )}>
                     {msg.thinking && (
-                      <div className="mb-4 text-[11px] text-muted-foreground/80 border-l-2 border-primary/20 pl-3 py-1 bg-primary/5 rounded-r-lg not-prose">
+                      <div className="mb-4 text-[11px] text-muted-foreground/70 pl-0 py-1 bg-transparent not-prose">
                         <details className="group" open={!msg.done}>
                           <summary className="cursor-pointer list-none flex items-center gap-1.5 font-bold hover:text-primary transition-colors select-none">
                             <ChevronRight className="w-3 h-3 group-open:rotate-90 transition-transform" />
@@ -1614,18 +2242,59 @@ function CreateAgentContent() {
                         </details>
                       </div>
                     )}
+
+                    {msg.status && !msg.done && (
+                      <div className="flex items-center gap-2 mb-2 text-[10px] text-primary font-bold animate-pulse">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        <span>{msg.status}</span>
+                      </div>
+                    )}
+
                     {msg.content ? (
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
                         {msg.content}
                       </ReactMarkdown>
                     ) : (
-                      msg.role === "assistant" && i === messages.length - 1 ? (
+                      msg.role === "assistant" && i === messages.length - 1 && !msg.status ? (
                         <div className="flex gap-1 py-1">
                           <div className="w-1.5 h-1.5 bg-muted-foreground/30 rounded-full animate-bounce" />
                           <div className="w-1.5 h-1.5 bg-muted-foreground/30 rounded-full animate-bounce [animation-delay:0.2s]" />
                           <div className="w-1.5 h-1.5 bg-muted-foreground/30 rounded-full animate-bounce [animation-delay:0.4s]" />
                         </div>
                       ) : null
+                    )}
+
+                    {msg.interrupt && (
+                      <div className="mt-4 p-4 bg-amber-500/10 rounded-2xl border border-amber-500/20 space-y-3 not-prose">
+                        <div className="flex items-center gap-2 text-amber-600 font-bold text-[10px] uppercase tracking-wider">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Yêu cầu phê duyệt công cụ</span>
+                        </div>
+                        <p className="text-xs text-foreground font-bold">{msg.interrupt.message}</p>
+                        <div className="bg-black/5 dark:bg-white/5 p-3 rounded-xl border border-black/5">
+                          <p className="text-[9px] font-mono opacity-60 uppercase mb-1 font-bold">Đối số (Arguments):</p>
+                          <pre className="text-[10px] font-mono whitespace-pre-wrap overflow-x-auto max-h-32 custom-scrollbar opacity-80">
+                            {JSON.stringify(msg.interrupt.tool_args, null, 2)}
+                          </pre>
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <Button 
+                            size="sm" 
+                            className="flex-1 rounded-xl bg-primary text-white font-bold h-9 shadow-lg shadow-primary/20"
+                            onClick={() => handleResume(true)}
+                          >
+                            Đồng ý thực thi
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            className="flex-1 rounded-xl border-muted-foreground/20 font-bold h-9 bg-background"
+                            onClick={() => handleResume(false)}
+                          >
+                            Từ chối
+                          </Button>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1642,94 +2311,8 @@ function CreateAgentContent() {
                   className="rounded-2xl pr-12 h-12 border-2 border-muted-foreground/10 focus:border-primary/40 bg-muted/5 transition-all shadow-none disabled:opacity-50"
                   onKeyDown={async (e) => {
                     if (e.key === "Enter" && e.currentTarget.value && agentId) {
-                      const content = e.currentTarget.value;
+                      handleChat(e.currentTarget.value);
                       e.currentTarget.value = "";
-
-                      // Thêm tin nhắn user
-                      const userMsg = { role: "user", content };
-                      setMessages(prev => [...prev, userMsg]);
-
-                      // Thêm tin nhắn assistant trống để chuẩn bị stream
-                      setMessages(prev => [...prev, { role: "assistant", content: "", done: false }]);
-
-                      try {
-                        const token = localStorage.getItem("access_token");
-                        const response = await fetch("http://localhost:8000/api/v1/chat/stream", {
-                          method: "POST",
-                          headers: {
-                            "Content-Type": "application/json",
-                            "Authorization": `Bearer ${token}`
-                          },
-                          body: JSON.stringify({
-                            agent_id: agentId,
-                            message: content
-                          })
-                        });
-
-                        if (!response.ok) throw new Error("Stream failed");
-
-                        const reader = response.body?.getReader();
-                        const decoder = new TextDecoder();
-                        if (reader) {
-                          let accumulatedContent = "";
-                          let accumulatedThinking = "";
-
-                          while (true) {
-                            const { done, value } = await reader.read();
-                            if (done) break;
-
-                            const chunk = decoder.decode(value);
-                            const lines = chunk.split("\n");
-
-                            for (const line of lines) {
-                              if (line.startsWith("data: ")) {
-                                const dataStr = line.replace("data: ", "").trim();
-                                if (dataStr === "[DONE]") continue;
-
-                                try {
-                                  const data = JSON.parse(dataStr);
-
-                                  if (data.thinking) {
-                                    accumulatedThinking += data.thinking;
-                                    setMessages(prev => {
-                                      const newMsgs = [...prev];
-                                      if (newMsgs.length > 0) {
-                                        newMsgs[newMsgs.length - 1].thinking = accumulatedThinking;
-                                      }
-                                      return newMsgs;
-                                    });
-                                  }
-
-                                  if (data.content && typeof data.content === 'string') {
-                                    accumulatedContent += data.content;
-                                    setMessages(prev => {
-                                      const newMsgs = [...prev];
-                                      if (newMsgs.length > 0) {
-                                        newMsgs[newMsgs.length - 1].content = accumulatedContent;
-                                      }
-                                      return newMsgs;
-                                    });
-                                  }
-                                } catch (e) {
-                                  console.error("Error parsing SSE data:", e);
-                                }
-                              }
-                            }
-                          }
-
-                          // Đánh dấu hoàn thành khi thoát loop stream
-                          setMessages(prev => {
-                            const newMsgs = [...prev];
-                            if (newMsgs.length > 0) {
-                              newMsgs[newMsgs.length - 1].done = true;
-                            }
-                            return newMsgs;
-                          });
-                        }
-                      } catch (error) {
-                        console.error("Chat error:", error);
-                        addNotification("error", "Lỗi hội thoại", "Không thể kết nối với Agent.");
-                      }
                     }
                   }}
                 />
@@ -1773,7 +2356,7 @@ function CreateAgentContent() {
                   }, {} as Record<string, typeof availableTools>)
                 ).map(([category, tools]) => (
                   <div key={category} className="space-y-4">
-                    <button 
+                    <button
                       onClick={() => setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }))}
                       className="flex items-center justify-between w-full px-1 group/cat"
                     >
@@ -1782,58 +2365,60 @@ function CreateAgentContent() {
                       </div>
                       <ChevronRight className={cn("w-4 h-4 text-muted-foreground transition-transform duration-300", expandedCategories[category] && "rotate-90")} />
                     </button>
-                    
+
                     {expandedCategories[category] && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
                         {tools.map((tool) => {
-                        const existingTool = formData.tools.find(t => t.name === tool.name);
-                        const isActive = !!existingTool;
-                        return (
-                          <div
-                            key={tool.name}
-                            className={cn(
-                              "p-4 border rounded-xl transition-all duration-300 flex items-start gap-4 group relative overflow-hidden",
-                              isActive
-                                ? "bg-primary/5 border-primary/30"
-                                : "bg-white dark:bg-zinc-900 hover:border-primary/50 hover:shadow-md cursor-pointer"
-                            )}
-                            onClick={() => {
-                              if (!isActive) {
-                                setFormData(prev => ({
-                                  ...prev,
-                                  tools: [...prev.tools, { name: tool.name, is_active: true }]
-                                }));
-                                addNotification("success", "Đã thêm công cụ", `Đã thêm ${tool.label || tool.name} thành công.`);
-                              }
-                            }}
-                          >
-                            <div className={cn(
-                              "w-12 h-12 rounded-xl flex items-center justify-center shrink-0 border transition-all",
-                              isActive ? "bg-primary text-white" : "bg-muted group-hover:bg-primary/10 group-hover:text-primary"
-                            )}>
-                              {isActive ? <Bot className="w-6 h-6" /> : <Terminal className="w-6 h-6" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between mb-1">
-                                <p className="text-sm font-bold truncate">{tool.label || tool.name}</p>
-                                {isActive && (
-                                  <span className="text-[9px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full">ĐÃ THÊM</span>
-                                )}
+                          const existingTool = formData.tools.find(t => t.name === tool.name);
+                          const isActive = !!existingTool;
+                          return (
+                            <div
+                              key={tool.name}
+                              className={cn(
+                                "p-4 border rounded-2xl transition-all duration-300 flex items-start gap-4 group relative overflow-hidden",
+                                isActive
+                                  ? "bg-primary/[0.03] border-primary/30 shadow-sm"
+                                  : "bg-white dark:bg-zinc-900/50 hover:border-primary/50 hover:shadow-xl hover:-translate-y-0.5 cursor-pointer"
+                              )}
+                              onClick={() => {
+                                if (!isActive) {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    tools: [...prev.tools, { name: tool.name, is_active: true }]
+                                  }));
+                                  addNotification("success", "Đã thêm công cụ", `Đã thêm ${tool.label || tool.name} thành công.`);
+                                }
+                              }}
+                            >
+                              <div className={cn(
+                                "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border transition-all duration-500 shadow-sm",
+                                isActive ? "bg-white dark:bg-zinc-800 border-primary/20 shadow-primary/10" : "bg-muted/30 group-hover:bg-primary/5 group-hover:border-primary/20 group-hover:scale-110"
+                              )}>
+                                {getToolIcon(tool.name, category, "w-6 h-6")}
                               </div>
-                              <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
-                                {tool.description}
-                              </p>
-                            </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-start justify-between gap-2 mb-1">
+                                  <p className="text-sm font-bold leading-tight group-hover:text-primary transition-colors">{tool.label || tool.name}</p>
+                                  {isActive && (
+                                    <Badge className="shrink-0 text-[8px] h-4 bg-primary/10 text-primary border-none font-black px-1.5 uppercase tracking-tighter">ĐÃ THÊM</Badge>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2 font-medium">
+                                  {tool.description}
+                                </p>
+                              </div>
 
-                            {!isActive && (
-                              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Plus className="w-4 h-4 text-primary" />
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+                              {!isActive && (
+                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
+                                  <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                                    <Plus className="w-3.5 h-3.5" />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 ))}
@@ -1956,6 +2541,388 @@ function CreateAgentContent() {
         description={confirmConfig.description}
       />
 
+      {/* Tool Configuration Modal */}
+      <Dialog open={showToolConfig} onOpenChange={setShowToolConfig}>
+        <DialogContent className="sm:max-w-[550px] rounded-[1.5rem] p-0 overflow-hidden border-none shadow-2xl">
+          <div className="bg-primary/5 p-8 border-b border-primary/10">
+            <div className="flex items-center gap-4 mb-2">
+              <div className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-800 flex items-center justify-center shadow-sm border border-primary/10">
+                {editingTool && getToolIcon(editingTool.name, undefined, "w-6 h-6")}
+              </div>
+              <div>
+                <DialogTitle className="text-xl font-bold">Cấu hình công cụ</DialogTitle>
+                <DialogDescription className="font-medium text-xs opacity-70">
+                  Tùy chỉnh cách Agent hiểu và sử dụng công cụ này.
+                </DialogDescription>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Tên hiển thị (Label)</label>
+              <Input
+                placeholder="VD: Tìm kiếm email khách hàng"
+                value={toolOverrideData.label}
+                onChange={(e) => setToolOverrideData({ ...toolOverrideData, label: e.target.value })}
+                className="rounded-xl h-12 border-muted-foreground/20 focus:ring-primary/20 bg-muted/5 font-medium"
+              />
+              <p className="text-[10px] text-muted-foreground italic ml-1">Mẹo: Tên rõ ràng giúp LLM quyết định gọi công cụ chính xác hơn.</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Mô tả chi tiết (Description)</label>
+              <Textarea
+                placeholder="Mô tả khi nào Agent nên dùng công cụ này và nó trả về kết quả gì..."
+                value={toolOverrideData.description}
+                onChange={(e) => setToolOverrideData({ ...toolOverrideData, description: e.target.value })}
+                className="rounded-xl min-h-[120px] border-muted-foreground/20 focus:ring-primary/20 bg-muted/5 font-medium resize-none"
+              />
+            </div>
+
+            {/* Dynamic Parameter Form */}
+            {editingTool?.info?.supported_params && editingTool.info.supported_params.length > 0 && (
+              <div className="space-y-5 pt-2">
+                <div className="flex items-center gap-2 ml-1">
+                  <Settings className="w-3.5 h-3.5 text-primary" />
+                  <label className="text-[11px] font-bold uppercase tracking-widest text-foreground">Cấu hình tham số</label>
+                </div>
+                
+                <div className="grid grid-cols-1 gap-5 p-5 bg-muted/20 rounded-2xl border border-muted-foreground/10">
+                  {editingTool.info.supported_params.map((param: any) => (
+                    <div key={param.key} className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <label className="text-xs font-bold text-foreground/80 ml-1">{param.label}</label>
+                        <span className="text-[10px] font-mono text-muted-foreground opacity-50 uppercase">{param.key}</span>
+                      </div>
+                      
+                      {param.type === "select" ? (
+                        <Select 
+                          value={editingTool.params?.[param.key] || param.default} 
+                          onValueChange={(val) => {
+                            const currentParams = editingTool.params || {};
+                            setEditingTool({ ...editingTool, params: { ...currentParams, [param.key]: val } });
+                          }}
+                        >
+                          <SelectTrigger className="rounded-xl h-10 bg-background border-muted-foreground/20">
+                            <SelectValue placeholder={`Chọn ${param.label.toLowerCase()}...`} />
+                          </SelectTrigger>
+                          <SelectContent className="rounded-xl border-muted-foreground/20">
+                            {param.options?.map((opt: any) => (
+                              <SelectItem key={opt.value} value={opt.value} className="text-xs font-medium">
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Input 
+                          type={param.type === "number" ? "number" : "text"}
+                          placeholder={param.desc || `Nhập ${param.label.toLowerCase()}...`}
+                          value={editingTool.params?.[param.key] ?? param.default}
+                          onChange={(e) => {
+                            const val = param.type === "number" ? parseInt(e.target.value) : e.target.value;
+                            const currentParams = editingTool.params || {};
+                            setEditingTool({ ...editingTool, params: { ...currentParams, [param.key]: val } });
+                          }}
+                          className="rounded-xl h-10 bg-background border-muted-foreground/20 text-xs font-medium"
+                        />
+                      )}
+                      {param.desc && <p className="text-[10px] text-muted-foreground italic ml-1">{param.desc}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Operational Settings */}
+            <div className="space-y-5 pt-4 border-t border-dashed border-muted-foreground/10">
+              <div className="flex items-center gap-2 ml-1">
+                <Bot className="w-3.5 h-3.5 text-primary" />
+                <label className="text-[11px] font-bold uppercase tracking-widest text-foreground">Cài đặt vận hành</label>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 p-5 bg-primary/[0.02] rounded-2xl border border-primary/10">
+                {/* Human in the loop */}
+                <div className="flex items-center justify-between p-1">
+                  <div className="space-y-0.5">
+                    <label className="text-xs font-bold text-foreground/80">Cần phê duyệt (Human-in-the-loop)</label>
+                    <p className="text-[10px] text-muted-foreground italic leading-none">Dừng lại và chờ bạn xác nhận trước khi thực thi công cụ.</p>
+                  </div>
+                  <div 
+                    className={cn(
+                      "w-10 h-5 rounded-full p-1 cursor-pointer transition-colors duration-300",
+                      editingTool?.params?.human_in_loop ? "bg-primary" : "bg-muted-foreground/20"
+                    )}
+                    onClick={() => {
+                      const currentParams = editingTool?.params || {};
+                      setEditingTool({ ...editingTool, params: { ...currentParams, human_in_loop: !currentParams.human_in_loop } });
+                    }}
+                  >
+                    <div className={cn(
+                      "w-3 h-3 bg-white rounded-full transition-transform duration-300",
+                      editingTool?.params?.human_in_loop ? "translate-x-5" : "translate-x-0"
+                    )} />
+                  </div>
+                </div>
+
+                {/* Rate Limit */}
+                <div className="space-y-2 pt-2 border-t border-primary/5">
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs font-bold text-foreground/80">Giới hạn lượt gọi (Rate Limit)</label>
+                    <span className="text-[10px] font-medium text-muted-foreground opacity-70">lần/phút</span>
+                  </div>
+                  <Input 
+                    type="number"
+                    placeholder="Không giới hạn"
+                    value={editingTool?.params?.rate_limit || ""}
+                    onChange={(e) => {
+                      const val = e.target.value ? parseInt(e.target.value) : undefined;
+                      const currentParams = editingTool?.params || {};
+                      setEditingTool({ ...editingTool, params: { ...currentParams, rate_limit: val } });
+                    }}
+                    className="rounded-xl h-10 bg-background border-muted-foreground/20 text-xs font-medium"
+                  />
+                  <p className="text-[10px] text-muted-foreground italic ml-1 leading-relaxed">
+                    Tránh việc Agent lặp lại tool quá nhiều lần hoặc vượt quá hạn ngạch API.
+                  </p>
+                </div>
+
+                {/* Run Limit */}
+                <div className="space-y-2 pt-2 border-t border-primary/5">
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs font-bold text-foreground/80">Giới hạn mỗi lượt (Run Limit)</label>
+                    <span className="text-[10px] font-medium text-muted-foreground opacity-70">lần/tin nhắn</span>
+                  </div>
+                  <Input 
+                    type="number"
+                    placeholder="Không giới hạn"
+                    value={editingTool?.params?.run_limit || ""}
+                    onChange={(e) => {
+                      const val = e.target.value ? parseInt(e.target.value) : undefined;
+                      const currentParams = editingTool?.params || {};
+                      setEditingTool({ ...editingTool, params: { ...currentParams, run_limit: val } });
+                    }}
+                    className="rounded-xl h-10 bg-background border-muted-foreground/20 text-xs font-medium"
+                  />
+                </div>
+
+                {/* Thread Limit */}
+                <div className="space-y-2 pt-2 border-t border-primary/5">
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs font-bold text-foreground/80">Tổng giới hạn (Thread Limit)</label>
+                    <span className="text-[10px] font-medium text-muted-foreground opacity-70">lần/phiên</span>
+                  </div>
+                  <Input 
+                    type="number"
+                    placeholder="Không giới hạn"
+                    value={editingTool?.params?.thread_limit || ""}
+                    onChange={(e) => {
+                      const val = e.target.value ? parseInt(e.target.value) : undefined;
+                      const currentParams = editingTool?.params || {};
+                      setEditingTool({ ...editingTool, params: { ...currentParams, thread_limit: val } });
+                    }}
+                    className="rounded-xl h-10 bg-background border-muted-foreground/20 text-xs font-medium"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="p-6 bg-muted/20 gap-3">
+            <Button
+              variant="ghost"
+              onClick={() => setShowToolConfig(false)}
+              className="rounded-xl h-11 px-6 font-bold"
+            >
+              Hủy bỏ
+            </Button>
+            <Button
+              onClick={() => {
+                const newTools = formData.tools.map(t => 
+                  t.name === editingTool.name ? { 
+                    ...t, 
+                    label: toolOverrideData.label, 
+                    description: toolOverrideData.description,
+                    params: editingTool.params 
+                  } : t
+                );
+                setFormData({ ...formData, tools: newTools });
+                setShowToolConfig(false);
+                addNotification("success", "Đã cập nhật", `Đã lưu cấu hình cho công cụ ${editingTool.name}`);
+                if (agentId) {
+                  handleSave({ ...formData, tools: newTools });
+                }
+              }}
+              className="rounded-xl h-11 px-8 font-bold bg-primary text-white shadow-lg shadow-primary/20"
+            >
+              Lưu thay đổi
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Create New Connection */}
+      <Dialog open={showAddConnection} onOpenChange={setShowAddConnection}>
+        <DialogContent className="sm:max-w-[500px] rounded-[1rem]">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+              <Plus className="w-6 h-6 text-primary" />
+              Tạo kết nối mới
+            </DialogTitle>
+            <DialogDescription className="font-medium">
+              Kết nối trực tiếp nguồn dữ liệu cho Agent này.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-6 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Tên kết nối</label>
+                <Input
+                  placeholder="VD: PostgreSQL Production"
+                  value={newConnectionData.name}
+                  onChange={(e) => setNewConnectionData({ ...newConnectionData, name: e.target.value })}
+                  className="rounded-[0.5rem] font-medium"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Engine</label>
+                <select
+                  className="w-full h-10 px-3 py-2 rounded-[0.5rem] border bg-background text-sm font-medium focus:ring-2 focus:ring-primary outline-none"
+                  value={newConnectionData.engine}
+                  onChange={(e) => setNewConnectionData({ ...newConnectionData, engine: e.target.value })}
+                >
+                  <option value="postgres">PostgreSQL</option>
+                  <option value="mysql">MySQL</option>
+                  <option value="snowflake">Snowflake</option>
+                  <option value="bigquery">Google BigQuery</option>
+                  <option value="powerbi">Power BI Dataset</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="col-span-2 space-y-2">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Host / Endpoint</label>
+                <Input
+                  placeholder="localhost or IP"
+                  value={newConnectionData.host}
+                  onChange={(e) => setNewConnectionData({ ...newConnectionData, host: e.target.value })}
+                  className="rounded-[0.5rem] font-medium"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Port</label>
+                <Input
+                  type="number"
+                  value={newConnectionData.port}
+                  onChange={(e) => setNewConnectionData({ ...newConnectionData, port: parseInt(e.target.value) })}
+                  className="rounded-[0.5rem] font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Database Name</label>
+                <Input
+                  placeholder="my_database"
+                  value={newConnectionData.database}
+                  onChange={(e) => setNewConnectionData({ ...newConnectionData, database: e.target.value })}
+                  className="rounded-[0.5rem] font-medium"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Schema (Optional)</label>
+                <Input
+                  placeholder="public"
+                  value={newConnectionData.schema_name}
+                  onChange={(e) => setNewConnectionData({ ...newConnectionData, schema_name: e.target.value })}
+                  className="rounded-[0.5rem] font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Username</label>
+                <Input
+                  placeholder="admin"
+                  value={newConnectionData.username}
+                  onChange={(e) => setNewConnectionData({ ...newConnectionData, username: e.target.value })}
+                  className="rounded-[0.5rem] font-medium"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Password</label>
+                <Input
+                  type="password"
+                  placeholder="••••••••"
+                  value={newConnectionData.plain_password}
+                  onChange={(e) => setNewConnectionData({ ...newConnectionData, plain_password: e.target.value })}
+                  className="rounded-[0.5rem] font-medium"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-6 flex flex-col gap-4">
+            {indexingTask ? (
+              <div className="w-full p-4 rounded-xl bg-muted/30 border border-primary/20 animate-in fade-in zoom-in-95 duration-300">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    {indexingTask.status === "processing" ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                    ) : indexingTask.status === "completed" ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-destructive" />
+                    )}
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-foreground/80">
+                      {indexingTask.status === "processing" ? "Đang trích xuất schema..." :
+                        indexingTask.status === "completed" ? "Đã lập chỉ mục xong!" : "Lỗi lập chỉ mục"}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono text-muted-foreground">{indexingTask.id.slice(0, 8)}</span>
+                </div>
+                <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                  <div className={cn(
+                    "h-full transition-all duration-500",
+                    indexingTask.status === "processing" ? "w-2/3 bg-primary animate-pulse" :
+                      indexingTask.status === "completed" ? "w-full bg-emerald-500" : "w-full bg-destructive"
+                  )} />
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-2 leading-tight">
+                  {indexingTask.status === "processing" ? "Vui lòng đợi, hệ thống đang lưu cấu trúc database vào Vector DB." :
+                    indexingTask.status === "completed" ? "Đã gán và sẵn sàng sử dụng." : "Đã có lỗi xảy ra."}
+                </p>
+              </div>
+            ) : (
+              <div className="flex gap-3 w-full">
+                <Button
+                  variant="outline"
+                  className="flex-1 rounded-[0.5rem] font-bold gap-2"
+                  onClick={handleTestConnection}
+                  disabled={isTestingConnection || isCreatingConnection}
+                >
+                  {isTestingConnection ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Test Connection
+                </Button>
+                <Button
+                  className="flex-1 rounded-[0.5rem] font-bold gap-2 shadow-lg shadow-primary/20"
+                  onClick={handleCreateConnection}
+                  disabled={isCreatingConnection || isTestingConnection}
+                >
+                  {isCreatingConnection ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  Tạo và Gán kết nối
+                </Button>
+              </div>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* --- Modal: Create New Skill --- */}
       <AnimatePresence>
         {isCreateSkillOpen && (
@@ -2012,13 +2979,13 @@ function CreateAgentContent() {
                   <div className="flex items-center justify-between ml-1">
                     <label className="text-[11px] font-bold text-foreground/60 uppercase">Nội dung chi tiết (SKILL.md)</label>
                     <div className="flex bg-muted p-0.5 rounded-lg border">
-                      <button 
+                      <button
                         className={cn("px-3 py-1 text-[10px] font-bold rounded-md transition-all", skillTab === "edit" ? "bg-background shadow-sm text-primary" : "text-muted-foreground")}
                         onClick={() => setSkillTab("edit")}
                       >
                         Soạn thảo
                       </button>
-                      <button 
+                      <button
                         className={cn("px-3 py-1 text-[10px] font-bold rounded-md transition-all", skillTab === "preview" ? "bg-background shadow-sm text-primary" : "text-muted-foreground")}
                         onClick={() => setSkillTab("preview")}
                       >
@@ -2026,7 +2993,7 @@ function CreateAgentContent() {
                       </button>
                     </div>
                   </div>
-                  
+
                   {skillTab === "edit" ? (
                     <Textarea
                       placeholder="# TỔNG QUAN\n...\n# HƯỚNG DẪN\n1. Bước một...\n2. Bước hai..."

@@ -1,12 +1,28 @@
+import bcrypt
 from datetime import datetime, timedelta
 from typing import Any, Union
 from jose import jwt
-from passlib.context import CryptContext
+from cryptography.fernet import Fernet
 from app.core.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 ALGORITHM = "HS256"
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode('utf-8'), 
+            hashed_password.encode('utf-8')
+        )
+    except Exception:
+        return False
+
+def get_password_hash(password: str) -> str:
+    # Bcrypt giới hạn 72 ký tự, nên nếu password quá dài ta có thể hash nó trước
+    # Nhưng với hầu hết các trường hợp, bcrypt.hashpw là đủ
+    return bcrypt.hashpw(
+        password.encode('utf-8'), 
+        bcrypt.gensalt()
+    ).decode('utf-8')
 
 def create_access_token(subject: Union[str, Any], expires_delta: timedelta = None) -> str:
     if expires_delta:
@@ -35,12 +51,6 @@ from app.models.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
-
 async def get_current_user(
     db: AsyncSession = Depends(get_db),
     token: str = Depends(oauth2_scheme)
@@ -63,3 +73,23 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     return user
+
+# --- Two-way Encryption for DB Passwords ---
+def get_fernet() -> Fernet:
+    key = settings.ENCRYPTION_KEY
+    if not key or len(key) == 0:
+        # Fallback to a stable key derived from SECRET_KEY if ENCRYPTION_KEY is not set
+        # This is better than a random key that changes on every restart
+        import base64
+        import hashlib
+        stable_key = base64.urlsafe_b64encode(hashlib.sha256(settings.SECRET_KEY.encode()).digest())
+        return Fernet(stable_key)
+    return Fernet(key.encode())
+
+def encrypt_password(password: str) -> str:
+    f = get_fernet()
+    return f.encrypt(password.encode()).decode()
+
+def decrypt_password(encrypted_password: str) -> str:
+    f = get_fernet()
+    return f.decrypt(encrypted_password.encode()).decode()

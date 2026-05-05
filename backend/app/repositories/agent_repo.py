@@ -29,3 +29,10 @@ class AgentRepository:
         await self.db.commit()
         await self.db.refresh(agent)
         return agent
+
+    async def delete(self, agent_id: str, user_id: str):
+        from sqlalchemy import delete as sa_delete
+        await self.db.execute(
+            sa_delete(Agent).where(Agent.id == agent_id, Agent.user_id == user_id)
+        )
+        await self.db.commit()

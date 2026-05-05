@@ -22,58 +22,123 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { useAgents } from "@/hooks/use-agents";
+import { useNotifications } from "@/hooks/use-notifications";
+import { fetchWithAuth } from "@/lib/api";
 
 interface WorkflowItem {
   id: string;
   name: string;
-  agentId: string;
-  agentName: string;
+  agents: { id: string, name: string }[];
 }
 
 export default function WorkflowsPage() {
   const [items, setItems] = useState<WorkflowItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const { agents, refreshAgents } = useAgents();
+  const { addNotification } = useNotifications();
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [newWorkflow, setNewWorkflow] = useState({ name: "", description: "" });
+
+  const handleDeleteWorkflow = async (item: WorkflowItem, agentId: string) => {
+    const agentName = item.agents.find(a => a.id === agentId)?.name;
+    if (!window.confirm(`Bạn có chắc muốn xóa quy trình "${item.name}" khỏi Agent "${agentName}"?`)) return;
+
+    try {
+      const agent = agents.find(a => a.id === agentId);
+      if (!agent) return;
+
+      const updatedTools = (agent.tools || []).filter((t: any) => {
+        const tName = typeof t === "string" ? t : (t.name || t.label);
+        return tName !== item.name;
+      });
+      
+      const res = await fetchWithAuth(`/agents/${agentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tools: updatedTools })
+      });
+
+      if (res.ok) {
+        addNotification("success", "Thành công", `Đã gỡ quy trình khỏi Agent ${agent.name}.`);
+        refreshAgents();
+        fetchWorkflows();
+      }
+    } catch (error) {
+      addNotification("error", "Lỗi", "Không thể gỡ quy trình.");
+    }
+  };
+
+  const handleInheritFromAgent = (agentId: string | null) => {
+    if (!agentId) return;
+    setSelectedAgentId(agentId);
+    const agent = agents.find(a => a.id === agentId);
+    if (agent) {
+      setNewWorkflow({
+        name: `Quy trình cho ${agent.name}`,
+        description: `Luồng xử lý tự động cho Agent ${agent.name}`
+      });
+    }
+  };
+
+  const fetchWorkflows = async () => {
+    try {
+      const res = await fetchWithAuth("/agents/");
+      const data = await res.json();
+      
+      if (Array.isArray(data)) {
+        const workflowMap: Record<string, WorkflowItem> = {};
+        data.forEach(agent => {
+          if (agent.tools) {
+            agent.tools.forEach((tool: any) => {
+              const toolName = typeof tool === "string" ? tool : (tool.name || "Unknown Workflow");
+              if (!workflowMap[toolName]) {
+                workflowMap[toolName] = {
+                  id: toolName,
+                  name: toolName,
+                  agents: []
+                };
+              }
+              workflowMap[toolName].agents.push({
+                id: agent.id,
+                name: agent.name
+              });
+            });
+          }
+        });
+        setItems(Object.values(workflowMap));
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchAgents = async () => {
-      const token = localStorage.getItem("access_token");
-      try {
-        const res = await fetch("http://localhost:8000/api/v1/agents/", {
-          headers: { "Authorization": `Bearer ${token}` }
-        });
-        const data = await res.json();
-        
-        if (Array.isArray(data)) {
-          const allTools: WorkflowItem[] = [];
-          data.forEach(agent => {
-            if (agent.tools) {
-              agent.tools.forEach((tool: any) => {
-                const toolName = typeof tool === "string" ? tool : (tool.name || "Unknown Workflow");
-                allTools.push({
-                  id: `${agent.id}-${toolName}`,
-                  name: toolName,
-                  agentId: agent.id,
-                  agentName: agent.name
-                });
-              });
-            }
-          });
-          setItems(allTools);
-        }
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAgents();
+    fetchWorkflows();
   }, []);
 
   const filteredItems = items.filter(item => {
     const nameMatch = (item.name || "").toString().toLowerCase().includes(searchQuery.toLowerCase());
-    const agentMatch = (item.agentName || "").toString().toLowerCase().includes(searchQuery.toLowerCase());
+    const agentMatch = item.agents.some(a => a.name.toLowerCase().includes(searchQuery.toLowerCase()));
     return nameMatch || agentMatch;
   });
 
@@ -85,7 +150,10 @@ export default function WorkflowsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Quy trình (Workflows)</h1>
           <p className="text-muted-foreground mt-1 text-sm font-medium opacity-80">Điều phối các công việc phức tạp thông qua sơ đồ luồng.</p>
         </div>
-        <Button className="rounded-[0.5rem] h-10 gap-2 shadow-lg shadow-primary/20 font-bold px-6">
+        <Button 
+          onClick={() => setIsAddOpen(true)}
+          className="rounded-[0.5rem] h-10 gap-2 shadow-lg shadow-primary/20 font-bold px-6"
+        >
           <GitBranch className="w-4 h-4" />
           Tạo Workflow
         </Button>
@@ -125,9 +193,13 @@ export default function WorkflowsPage() {
                   </div>
                   <div>
                     <h3 className="font-bold text-base text-foreground/90">{item.name}</h3>
-                    <div className="flex items-center gap-2 mt-1">
-                      <Bot className="w-3 h-3 text-muted-foreground" />
-                      <span className="text-[11px] font-medium text-muted-foreground">Kích hoạt bởi: {item.agentName}</span>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                      {item.agents.map(agent => (
+                        <Badge key={agent.id} variant="secondary" className="bg-primary/5 text-primary border-primary/10 text-[9px] py-0.5 px-2 rounded-md flex items-center gap-1">
+                          <Bot className="w-2.5 h-2.5" />
+                          {agent.name}
+                        </Badge>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -151,13 +223,19 @@ export default function WorkflowsPage() {
                         <MoreVertical className="w-4 h-4 text-muted-foreground" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="rounded-[0.5rem] border-muted-foreground/20 shadow-xl">
-                      <DropdownMenuItem className="rounded-md text-[11px] font-bold py-2.5 cursor-pointer">
+                    <DropdownMenuContent align="end" className="rounded-xl border-muted-foreground/20 shadow-2xl p-1.5 w-48">
+                      <DropdownMenuItem className="rounded-lg text-[11px] font-bold py-2.5 cursor-pointer">
                         <Settings className="w-3.5 h-3.5 mr-2" /> Mở trình thiết kế
                       </DropdownMenuItem>
-                      <DropdownMenuItem className="rounded-md text-[11px] font-bold py-2.5 cursor-pointer text-destructive focus:text-destructive">
-                        <Trash2 className="w-3.5 h-3.5 mr-2" /> Gỡ bỏ khỏi luồng
-                      </DropdownMenuItem>
+                      {item.agents.map(agent => (
+                        <DropdownMenuItem 
+                          key={agent.id}
+                          className="rounded-lg text-[11px] font-bold py-2.5 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
+                          onClick={() => handleDeleteWorkflow(item, agent.id)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5 mr-2" /> Gỡ khỏi {agent.name}
+                        </DropdownMenuItem>
+                      ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -171,6 +249,80 @@ export default function WorkflowsPage() {
           </div>
         )}
       </div>
+
+      {/* Create Workflow Dialog */}
+      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+        <DialogContent className="sm:max-w-[500px] rounded-[1.5rem] overflow-hidden p-0 border-none shadow-2xl">
+          <DialogHeader className="p-6 bg-gradient-to-br from-purple-500/10 to-transparent border-b">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center border border-purple-500/20 shadow-sm">
+                <GitBranch className="w-5 h-5 text-purple-600" />
+              </div>
+              <div>
+                <DialogTitle className="text-xl font-bold">Tạo Workflow mới</DialogTitle>
+                <DialogDescription className="text-xs font-medium">Thiết kế quy trình tự động hóa cho Agent của bạn.</DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="p-6 space-y-6">
+            {/* Kế thừa từ Agent */}
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                <Bot className="w-3 h-3 text-purple-600" /> Chọn Agent
+              </label>
+              <Select value={selectedAgentId || ""} onValueChange={handleInheritFromAgent}>
+                <SelectTrigger className="rounded-xl h-11 border-muted-foreground/20 bg-purple-500/5 border-purple-500/20 font-medium w-full overflow-hidden">
+                  <span className="truncate text-left">
+                    {selectedAgentId ? (agents.find(a => a.id === selectedAgentId)?.name || "Đang tải...") : "Chọn một Agent để kích hoạt..."}
+                  </span>
+                </SelectTrigger>
+                <SelectContent className="rounded-xl border-muted-foreground/20 shadow-xl">
+                  {agents.map(agent => (
+                    <SelectItem key={agent.id} value={agent.id} className="font-medium focus:bg-purple-50 cursor-pointer">
+                      {agent.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground italic">Lưu ý: Thao tác này sẽ tự động đề xuất tên và mô tả dựa trên đặc thù của Agent.</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Tên quy trình</label>
+              <Input 
+                placeholder="Ví dụ: Quy trình Phân loại Email tự động" 
+                value={newWorkflow.name}
+                onChange={(e) => setNewWorkflow({...newWorkflow, name: e.target.value})}
+                className="rounded-xl h-11 border-muted-foreground/20"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Mô tả luồng</label>
+              <Input 
+                placeholder="Mô tả ngắn gọn về các bước xử lý..." 
+                value={newWorkflow.description}
+                onChange={(e) => setNewWorkflow({...newWorkflow, description: e.target.value})}
+                className="rounded-xl h-11 border-muted-foreground/20"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="p-4 bg-muted/20 border-t flex gap-2">
+            <Button variant="ghost" onClick={() => setIsAddOpen(false)} className="rounded-xl font-bold">Hủy</Button>
+            <Button 
+              className="rounded-xl px-8 font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-lg shadow-purple-600/20"
+              onClick={() => {
+                addNotification("success", "Thành công", "Đã khởi tạo Workflow. Chuyển đến trình thiết kế...");
+                setIsAddOpen(false);
+              }}
+            >
+              Tiếp tục
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -17,7 +17,7 @@ from sqlalchemy import select
 from app.models.skill import Skill
 from psycopg_pool import AsyncConnectionPool
 
-logger = get_logger(__name__)
+logger = get_logger(__name__, log_file="logs/chat_service.log")
 
 class ChatService:
     _pool = None
@@ -76,7 +76,7 @@ class ChatService:
                 logger.info("✅ Khởi tạo xong.")
         return cls._pool
 
-    async def process_chat(self, agent_id: str, user_id: str, message: str):
+    async def process_chat(self, agent_id: str, user_id: str, message: str, command: dict = None):
         agent_db = await self.agent_repo.get_by_id(agent_id, user_id)
         if not agent_db:
             raise HTTPException(status_code=404, detail="Agent not found")
@@ -87,21 +87,29 @@ class ChatService:
             return cached_res
 
         agent_config = await self._get_agent_config(agent_db)
-        graph = create_chat_graph(agent_config)
+        # Cần checkpointer cho HITL
+        pool = await self.get_pool()
+        checkpointer = AsyncPostgresSaver(pool)
+        graph = create_chat_graph(agent_config, checkpointer=checkpointer)
         
+        thread_config = {"configurable": {"thread_id": user_id}}
         input_state = self._prepare_input_state(agent_id, agent_db, message)
         
-        final_state = await graph.ainvoke(input_state)
+        from langgraph.types import Command
+        input_data = Command(resume=command) if command else input_state
+        
+        final_state = await graph.ainvoke(input_data, config=thread_config)
         ai_message = final_state["messages"][-1]
         
         result = {"role": "assistant", "content": ai_message.content}
         
         # 2. Lưu vào Cache (Kèm user_id và agent_db)
-        redis_cache.set_chat_cache(agent_id, user_id, message, result, agent_db=agent_db)
+        if message and message.strip():
+            redis_cache.set_chat_cache(agent_id, user_id, message, result, agent_db=agent_db)
         
         return result
 
-    async def stream_chat(self, agent_id: str, user_id: str, message: str) -> StreamingResponse:
+    async def stream_chat(self, agent_id: str, user_id: str, message: str, command: dict = None) -> StreamingResponse:
         """
         API chính để chat với luồng dữ liệu đổ về liên tục (SSE) + Redis Cache + Redis Checkpointer
         """
@@ -114,28 +122,31 @@ class ChatService:
              return StreamingResponse(error_gen(), media_type="text/event-stream")
 
         # 1. Kiểm tra Semantic Cache (Lấy làm nhật ký tham khảo)
-        cached_res = redis_cache.get_chat_cache(agent_id, user_id, message, agent_db=agent_db)
+        cached_res = None
         cache_ref_text = ""
-        if cached_res:
-            logger.info(f"💡 Tìm thấy nhật ký tư duy cũ từ Semantic Cache cho User {user_id}")
-            old_thinking = cached_res.get("thinking", "Không có dữ liệu tư duy.")
-            old_content = cached_res.get("content", "")
-            cache_ref_text = f"--- NHẬT KÝ TƯ DUY CŨ ---\n{old_thinking}\n\n--- KẾT QUẢ CŨ ---\n{old_content}"
+        if message and message.strip():
+            cached_res = redis_cache.get_chat_cache(agent_id, user_id, message, agent_db=agent_db)
+            if cached_res:
+                logger.info(f"💡 Tìm thấy nhật ký tư duy cũ từ Semantic Cache cho User {user_id}")
+                old_thinking = cached_res.get("thinking", "Không có dữ liệu tư duy.")
+                old_content = cached_res.get("content", "")
+                cache_ref_text = f"--- NHẬT KÝ TƯ DUY CŨ ---\n{old_thinking}\n\n--- KẾT QUẢ CŨ ---\n{old_content}"
 
         async def event_generator():
+            from app.core.security import decrypt_password
+            from contextlib import AsyncExitStack
+            
             # --- ĐÃ CÓ AGENT DB Ở TRÊN ---
             agent_config = await self._get_agent_config(agent_db)
             
-            # Khởi tạo Postgres Checkpointer (Lưu vào DB lâu dài)
-            pool = await self.get_pool()
-            checkpointer = AsyncPostgresSaver(pool)
-            
             # Hàm custom embed dùng cấu hình của Agent
             async def custom_embed(texts: list[str]) -> list[list[float]]:
+                # Giải mã key
+                emb_key = decrypt_password(agent_db.embedding_api_key) if agent_db.embedding_api_key else None
                 emb = get_embeddings(
                     provider=agent_db.embedding_provider,
                     model=agent_db.embedding_model,
-                    api_key=agent_db.embedding_api_key
+                    api_key=emb_key
                 )
                 return await emb.aembed_documents(texts)
                 
@@ -155,19 +166,30 @@ class ChatService:
                 redis_cache.redis.set(cache_key_dims, actual_dims, ex=86400)
                 logger.info(f"💾 Cached embedding dimensions: {actual_dims} for {agent_db.embedding_model}")
 
-            store = AsyncPostgresStore(
-                pool,
-                index={
-                    "embed": custom_embed,
-                    "dims": actual_dims
-                }
-            )
+            # Khởi tạo Postgres Checkpointer & Store (Sử dụng context manager để tránh leak tasks)
+            pool = await self.get_pool()
             
-            # Đã setup ở get_pool() rồi, không cần gọi lại ở đây
-            logger.info("⚙️ Đang khởi tạo Graph...")
-            graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
-            thread_config = {"configurable": {"thread_id": user_id}}
-            input_state = self._prepare_input_state(agent_id, agent_db, message, cache_reference=cache_ref_text)
+            async with AsyncExitStack() as stack:
+                # 1. Setup Checkpointer
+                checkpointer = AsyncPostgresSaver(pool)
+                await stack.enter_async_context(checkpointer)
+                
+                # 2. Setup Store
+                store = AsyncPostgresStore(
+                    pool,
+                    index={
+                        "embed": custom_embed,
+                        "dims": actual_dims
+                    }
+                )
+                await stack.enter_async_context(store)
+                
+                logger.info("⚙️ Đang khởi tạo Graph...")
+                graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
+                # Tách biệt thread theo cả user và agent để tránh trùng lặp lịch sử
+                thread_id = f"{user_id}:{agent_id}"
+                thread_config = {"configurable": {"thread_id": thread_id}}
+                input_state = self._prepare_input_state(agent_id, agent_db, message, cache_reference=cache_ref_text)
             
             logger.info(f"🟢 Bắt đầu Stream cho User {user_id}...")
             full_content = ""
@@ -176,8 +198,16 @@ class ChatService:
             try:
                 context_obj = Context(user_id=user_id, agent_id=agent_id)
                 
+                # Nếu có command, thực hiện resume thay vì truyền input_state mới
+                from langgraph.types import Command
+                input_data = Command(resume=command) if command else input_state
+                
+                # Theo dõi run_id cho mỗi node để tránh trùng lặp
+                active_stream_run: dict[str, str] = {}
+                skipped_run_ids: set = set()
+                
                 async for event in graph.astream_events(
-                    input_state, 
+                    input_data, 
                     config=thread_config, 
                     version="v2",
                     context=context_obj
@@ -186,6 +216,23 @@ class ChatService:
                     node_name = event.get("metadata", {}).get("langgraph_node", "")
                     
                     if kind == "on_chat_model_stream":
+                        # --- DEDUP: Lọc events trùng lặp từ bind_tools ---
+                        run_id = event.get("run_id", "")
+                        
+                        if run_id in skipped_run_ids:
+                            continue
+                        
+                        if node_name in active_stream_run:
+                            if active_stream_run[node_name] != run_id:
+                                skipped_run_ids.add(run_id)
+                                continue
+                        else:
+                            active_stream_run[node_name] = run_id
+                        
+                        # Chỉ lấy content từ node chính (agent)
+                        # Tránh leak output từ các model call nội bộ trong tools (như Text2SQL)
+                        is_output_node = node_name in ["agent"]
+                        
                         chunk = event["data"]["chunk"]
                         content = chunk.content
                         thinking = ""
@@ -221,23 +268,25 @@ class ChatService:
                         if content:
                             content_str = str(content)
                             
-                            # Nếu đang trong chế độ thinking (đã gặp <thinking> nhưng chưa gặp </thinking>)
-                            if getattr(self, "_in_thinking", False):
-                                if "</thinking>" in content_str:
-                                    parts = content_str.split("</thinking>")
-                                    full_thinking += parts[0]
-                                    yield f"data: {json.dumps({'thinking': parts[0]})}\n\n"
-                                    self._in_thinking = False
-                                    if len(parts) > 1 and parts[1]:
-                                        full_content += parts[1]
-                                        yield f"data: {json.dumps({'content': parts[1]})}\n\n"
-                                else:
-                                    full_thinking += content_str
-                                    yield f"data: {json.dumps({'thinking': content_str})}\n\n"
-                            else:
-                                if "<thinking>" in content_str:
+                            # Nếu đang trong chế độ thinking hoặc có thẻ mở <thinking>
+                            if getattr(self, "_in_thinking", False) or "<thinking>" in content_str:
+                                if getattr(self, "_in_thinking", False):
+                                    if "</thinking>" in content_str:
+                                        parts = content_str.split("</thinking>")
+                                        full_thinking += parts[0]
+                                        yield f"data: {json.dumps({'thinking': parts[0]})}\n\n"
+                                        self._in_thinking = False
+                                        # Phần sau </thinking> là content, chỉ lấy nếu là output node
+                                        if len(parts) > 1 and parts[1] and is_output_node:
+                                            full_content += parts[1]
+                                            yield f"data: {json.dumps({'content': parts[1]})}\n\n"
+                                    else:
+                                        full_thinking += content_str
+                                        yield f"data: {json.dumps({'thinking': content_str})}\n\n"
+                                else: # Bắt đầu có thẻ <thinking>
                                     parts = content_str.split("<thinking>")
-                                    if parts[0]:
+                                    # Phần trước <thinking> là content, chỉ lấy nếu là output node
+                                    if parts[0] and is_output_node:
                                         full_content += parts[0]
                                         yield f"data: {json.dumps({'content': parts[0]})}\n\n"
                                     
@@ -248,13 +297,16 @@ class ChatService:
                                         full_thinking += t_parts[0]
                                         yield f"data: {json.dumps({'thinking': t_parts[0]})}\n\n"
                                         self._in_thinking = False
-                                        if len(t_parts) > 1 and t_parts[1]:
+                                        # Phần sau </thinking> là content, chỉ lấy nếu là output node
+                                        if len(t_parts) > 1 and t_parts[1] and is_output_node:
                                             full_content += t_parts[1]
                                             yield f"data: {json.dumps({'content': t_parts[1]})}\n\n"
                                     else:
                                         full_thinking += thinking_part
                                         yield f"data: {json.dumps({'thinking': thinking_part})}\n\n"
-                                else:
+                            else:
+                                # Content bình thường không có tag, chỉ lấy nếu là output node
+                                if is_output_node:
                                     full_content += content_str
                                     yield f"data: {json.dumps({'content': content_str})}\n\n"
                     
@@ -268,9 +320,24 @@ class ChatService:
                             status_msg = "📄 Đang phân tích tài liệu PDF..."
                             
                         yield f"data: {json.dumps({'status': status_msg})}\n\n"
+                    
+                    elif kind == "on_chat_model_end":
+                        # Reset run_id tracking khi model kết thúc
+                        # Cho phép lần gọi tiếp theo (vd: vòng lặp agent -> tools -> agent)
+                        if node_name in active_stream_run:
+                            del active_stream_run[node_name]
+                
+                # --- KIỂM TRA INTERRUPT (Human-in-the-loop) ---
+                graph_state = await graph.aget_state(thread_config)
+                if graph_state.next:
+                    # Nếu còn node tiếp theo, tức là đang dừng ở một điểm interrupt
+                    if graph_state.tasks and graph_state.tasks[0].interrupts:
+                        interrupt_payload = graph_state.tasks[0].interrupts[0].value
+                        logger.info(f"🛑 [HITL] Gửi yêu cầu phê duyệt tới UI: {interrupt_payload}")
+                        yield f"data: {json.dumps({'interrupt': interrupt_payload})}\n\n"
                 
                 # Lưu vào Semantic Cache sau khi hoàn thành (Sử dụng cấu hình của agent)
-                if full_content:
+                if full_content and message and message.strip():
                     redis_cache.set_chat_cache(agent_id, user_id, message, {
                         "content": full_content,
                         "thinking": full_thinking,
@@ -326,6 +393,7 @@ class ChatService:
         if skills_system_prompt:
             combined_instructions += skills_system_prompt
 
+        from app.core.security import decrypt_password
         return {
             "id": agent_db.id,
             "user_id": agent_db.user_id,
@@ -334,14 +402,14 @@ class ChatService:
             "description": agent_db.description,
             "model_provider": agent_db.model_provider,
             "model_name": agent_db.model_name,
-            "api_key": agent_db.api_key,
+            "api_key": decrypt_password(agent_db.api_key) if agent_db.api_key else None,
             "instructions": combined_instructions,
             "tools": agent_db.tools or [],
             "knowledge_files": agent_db.knowledge_files or [],
             "skills": agent_db.skills or [],
             "embedding_provider": agent_db.embedding_provider,
             "embedding_model": agent_db.embedding_model,
-            "embedding_api_key": agent_db.embedding_api_key,
+            "embedding_api_key": decrypt_password(agent_db.embedding_api_key) if agent_db.embedding_api_key else None,
             "user_google_tokens": user_google_tokens
         }
 

@@ -81,14 +81,15 @@ class BaseWAOAgent(ABC):
         internal_tool_names = ["web_reader", "pdf_reader"]
         public_tools = [t for t in self.tools if t.name not in internal_tool_names]
         
-        # Chỉ liệt kê tool trong Prompt nếu model KHÔNG hỗ trợ Binding (fallback)
+        # Chỉ liệt kê tool trong Prompt để LLM dễ nhận diện (Hỗ trợ tốt cho model Gemma/Ollama)
         tools_description = ""
-        # if public_tools:
-        #     tools_description = "DANH SÁCH CÔNG CỤ BẠN ĐANG CÓ:\n"
-        #     for tool in public_tools:
-        #         tools_description += f"- {tool.name}: {tool.description}\n"
-        # else:
-        #     tools_description = "Bạn hiện không có công cụ bổ sung nào."
+        if public_tools:
+            tools_description = "--- DANH SÁCH CÔNG CỤ BẠN ĐANG CÓ ---\n"
+            for tool in public_tools:
+                tools_description += f"- {tool.name}: {tool.description}\n"
+            tools_description += "\n"
+        else:
+            tools_description = "Bạn hiện không có công cụ bổ sung nào.\n\n"
 
         # Tạo danh sách file kiến thức (nếu có)
         knowledge_files = self.config.get("knowledge_files", [])
@@ -96,7 +97,6 @@ class BaseWAOAgent(ABC):
         if knowledge_files:
             kb_info = "📚 DANH SÁCH TÀI LIỆU NỘI BỘ (KHO TRI THỨC):\n"
             for f in knowledge_files:
-                # Xử lý nếu f là dict (có trường 'name' hoặc 'filename')
                 if isinstance(f, dict):
                     fname = f.get("name") or f.get("filename") or str(f)
                 else:
@@ -112,10 +112,15 @@ class BaseWAOAgent(ABC):
             "Vai trò: {description}\n\n"
             "THỜI GIAN HIỆN TẠI: {current_time}\n\n"
             "{kb_info}"
-            "--- QUY TẮC SỬ DỤNG CÔNG CỤ ---\n"
-            "1. Nếu câu hỏi liên quan đến nội dung trong KHO TRI THỨC, bạn PHẢI gọi 'graph_rag_search' ngay lập tức.\n"
-            "2. Chỉ sử dụng 'web_search' sau khi đã tra cứu kiến thức nội bộ mà không có kết quả.\n"
-            "3. Sử dụng 'gmail_manager' khi người dùng yêu cầu đọc, gửi hoặc quản lý email.\n\n"
+            "{tools_list}"
+            "--- QUY TẮC BẮT BUỘC ---\n"
+            "1. KHÔNG BAO GIỜ hiển thị quá trình suy nghĩ, lập kế hoạch hoặc các bước thực hiện nội bộ trực tiếp cho người dùng. Người dùng chỉ quan tâm đến kết quả cuối cùng.\n"
+            "2. Nếu bạn cần phân tích hoặc lập kế hoạch trước khi hành động, hãy bọc nội dung đó trong thẻ `<thinking>...</thinking>`. Nội dung này sẽ được hệ thống xử lý riêng và không hiển thị thô cho người dùng.\n"
+            "3. LUÔN LUÔN ưu tiên sử dụng SKILL trước khi sử dụng bất kỳ công cụ nào khác. Nếu câu hỏi liên quan đến một kỹ năng bạn có, hãy gọi 'load_skill' ngay lập tức.\n"
+            "4. Skill sẽ cung cấp hướng dẫn chi tiết cách sử dụng các công cụ (như query_database). Bạn PHẢI tuân thủ các hướng dẫn trong Skill.\n"
+            "5. Nếu câu hỏi liên quan đến nội dung trong KHO TRI THỨC, bạn PHẢI gọi 'graph_rag_search' để tìm ngữ cảnh.\n"
+            "6. Chỉ sử dụng 'web_search' sau khi đã tra cứu kiến thức nội bộ mà không có kết quả.\n"
+            "7. Sử dụng 'gmail_manager' khi người dùng yêu cầu đọc, gửi hoặc quản lý email.\n\n"
             "{instructions}"
         )
         

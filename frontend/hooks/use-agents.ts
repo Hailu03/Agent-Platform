@@ -11,6 +11,7 @@ export interface Agent {
   model_provider: string;
   model_name: string;
   is_active: boolean;
+  instructions?: string;
   knowledge_files?: any[];
   skills?: any[];
   tools?: any[];

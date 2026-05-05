@@ -40,6 +40,9 @@ class WAOChatAgent(BaseWAOAgent):
         async def _memorize_node(state, config):
             return await chat_memorize_node(state, config, self)
 
+        async def _memorize_node(state, config):
+            return await chat_memorize_node(state, config, self)
+
         workflow.add_node("agent", _agent_node)
         workflow.add_node("tools", _tools_node)
         workflow.add_node("research_refiner", _research_refiner_node)

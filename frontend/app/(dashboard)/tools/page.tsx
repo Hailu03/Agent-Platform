@@ -21,7 +21,9 @@ import {
   Eye,
   Edit2,
   Network,
-  Send
+  Send,
+  Plus,
+  CheckCircle2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,18 +44,36 @@ import {
   TableRow,
 } from "../../../components/ui/table";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { fetchWithAuth } from "@/lib/api";
+import { useAgents } from "@/hooks/use-agents";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from "../../../components/ui/dialog";
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 interface AvailableTool {
   name: string;
   label: string;
   description: string;
   category: string;
+  supported_params?: {
+    key: string;
+    label: string;
+    type: string;
+    default: any;
+    desc?: string;
+    options?: { label: string; value: any }[];
+  }[];
 }
 
 interface ToolItem {
@@ -64,11 +84,21 @@ interface ToolItem {
   category?: string;
   agentId: string;
   agentName: string;
+  params?: Record<string, any>;
+  supported_params?: {
+    key: string;
+    label: string;
+    type: string;
+    default: any;
+    desc?: string;
+    options?: { label: string; value: any }[];
+  }[];
 }
 
 export default function ToolsPage() {
   const router = useRouter();
   const { addNotification } = useNotifications();
+  const { agents, refreshAgents } = useAgents();
   const [items, setItems] = useState<ToolItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -77,55 +107,104 @@ export default function ToolsPage() {
   // State cho việc gỡ bỏ và khám phá
   const [isDeleting, setIsDeleting] = useState(false);
   const [isExploreOpen, setIsExploreOpen] = useState(false);
+  const [targetAgentId, setTargetAgentId] = useState<string | null>(null);
+
+  // Config Tool Modal
+  const [showToolConfig, setShowToolConfig] = useState(false);
+  const [editingItem, setEditingItem] = useState<ToolItem | null>(null);
+  const [toolOverrideData, setToolOverrideData] = useState({ label: "", description: "" });
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
+
+  const handleAddToolToAgent = async (tool: AvailableTool) => {
+    if (!targetAgentId) {
+      addNotification("warning", "Thiếu thông tin", "Vui lòng chọn một Agent để gán công cụ này.");
+      return;
+    }
+
+    const agent = agents.find(a => a.id === targetAgentId);
+    if (!agent) return;
+
+    // Kiểm tra nếu tool đã có trong agent
+    const existingTools = Array.isArray(agent.tools) ? agent.tools : [];
+    const toolName = tool.name;
+    
+    if (existingTools.some((t: any) => (typeof t === 'string' ? t === toolName : t.name === toolName))) {
+      addNotification("info", "Đã tồn tại", `Agent ${agent.name} đã có công cụ ${tool.label || tool.name}.`);
+      return;
+    }
+
+    try {
+      const updatedTools = [...existingTools, toolName];
+      const res = await fetchWithAuth(`/agents/${targetAgentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tools: updatedTools })
+      });
+
+      if (res.ok) {
+        addNotification("success", "Thành công", `Đã thêm ${tool.label || tool.name} vào Agent ${agent.name}.`);
+        refreshAgents(); // Refresh data
+        // Refresh local tools list
+        fetchData();
+      } else {
+        throw new Error("Failed to update agent tools");
+      }
+    } catch (error) {
+      addNotification("error", "Lỗi", "Không thể thêm công cụ vào Agent.");
+    }
+  };
+
+  const fetchData = async () => {
+    const token = localStorage.getItem("access_token");
+    try {
+      // 1. Fetch available tools metadata
+      const toolRes = await fetch("http://localhost:8000/api/v1/agents/tools/available", {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const metaTools: AvailableTool[] = await toolRes.json();
+      setAvailableTools(metaTools);
+
+      // 2. Fetch agents and their active tools
+      const res = await fetch("http://localhost:8000/api/v1/agents/", {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const data = await res.json();
+
+      if (Array.isArray(data)) {
+        const allTools: ToolItem[] = [];
+        const toolMap = new Map<string, AvailableTool>(metaTools.map((t: AvailableTool) => [t.name, t]));
+
+        data.forEach(agent => {
+          if (agent.tools) {
+            agent.tools.forEach((tool: any) => {
+              const toolName = typeof tool === "string" ? tool : (tool.name || "Unknown Tool");
+              const meta = toolMap.get(toolName);
+              const toolConfig = typeof tool === "string" ? {} : tool;
+
+              allTools.push({
+                id: `${agent.id}-${toolName}`,
+                name: toolName,
+                label: toolConfig.label || meta?.label || toolName,
+                description: toolConfig.description || meta?.description || "Công cụ đã được cấu hình",
+                category: meta?.category || "Cơ bản",
+                agentId: agent.id,
+                agentName: agent.name,
+                params: toolConfig.params || {},
+                supported_params: meta?.supported_params || []
+              });
+            });
+          }
+        });
+        setItems(allTools);
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      const token = localStorage.getItem("access_token");
-      try {
-        // 1. Fetch available tools metadata
-        const toolRes = await fetch("http://localhost:8000/api/v1/agents/tools/available", {
-          headers: { "Authorization": `Bearer ${token}` }
-        });
-        const metaTools: AvailableTool[] = await toolRes.json();
-        setAvailableTools(metaTools);
-
-        // 2. Fetch agents and their active tools
-        const res = await fetch("http://localhost:8000/api/v1/agents/", {
-          headers: { "Authorization": `Bearer ${token}` }
-        });
-        const data = await res.json();
-
-        if (Array.isArray(data)) {
-          const allTools: ToolItem[] = [];
-          const toolMap = new Map<string, AvailableTool>(metaTools.map((t: AvailableTool) => [t.name, t]));
-
-          data.forEach(agent => {
-            if (agent.tools) {
-              agent.tools.forEach((tool: any) => {
-                const toolName = typeof tool === "string" ? tool : (tool.name || "Unknown Tool");
-                const meta = toolMap.get(toolName);
-
-                allTools.push({
-                  id: `${agent.id}-${toolName}`,
-                  name: toolName,
-                  label: meta?.label || toolName,
-                  description: meta?.description || "Công cụ đã được cấu hình",
-                  category: meta?.category || "Cơ bản",
-                  agentId: agent.id,
-                  agentName: agent.name
-                });
-              });
-            }
-          });
-          setItems(allTools);
-        }
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
   }, []);
 
@@ -172,8 +251,61 @@ export default function ToolsPage() {
     }
   };
 
-  const handleSettings = (agentId: string) => {
-    router.push(`/agents/create?id=${agentId}`);
+  const handleSettings = (item: ToolItem) => {
+    setEditingItem(item);
+    setToolOverrideData({
+      label: item.label || item.name,
+      description: item.description || ""
+    });
+    setShowToolConfig(true);
+  };
+
+  const handleSaveToolConfig = async () => {
+    if (!editingItem) return;
+    setIsSavingConfig(true);
+    const token = localStorage.getItem("access_token");
+    
+    try {
+      // 1. Lấy thông tin Agent hiện tại
+      const agentRes = await fetch(`http://localhost:8000/api/v1/agents/${editingItem.agentId}`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      const agent = await agentRes.json();
+
+      // 2. Cập nhật label/desc cho tool trong danh sách tools của agent
+      const updatedTools = agent.tools.map((t: any) => {
+        const tName = typeof t === "string" ? t : t.name;
+        if (tName === editingItem.name) {
+          return {
+            ...(typeof t === "string" ? { name: t } : t),
+            label: toolOverrideData.label,
+            description: toolOverrideData.description,
+            params: editingItem.params,
+            is_active: true
+          };
+        }
+        return t;
+      });
+
+      // 3. Gửi cập nhật
+      const res = await fetchWithAuth(`/agents/${editingItem.agentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tools: updatedTools })
+      });
+
+      if (res.ok) {
+        addNotification("success", "Thành công", `Đã cập nhật cấu hình cho ${editingItem.name}`);
+        setShowToolConfig(false);
+        fetchData(); // Tải lại danh sách
+      } else {
+        throw new Error("Failed to update tool config");
+      }
+    } catch (error) {
+      addNotification("error", "Lỗi", "Không thể lưu cấu hình công cụ.");
+    } finally {
+      setIsSavingConfig(false);
+    }
   };
 
   const filteredItems = items.filter(item => {
@@ -310,7 +442,7 @@ export default function ToolsPage() {
                       <DropdownMenuContent align="end" className="rounded-xl border-muted-foreground/20 shadow-2xl p-1.5 w-40">
                         <DropdownMenuItem
                           className="rounded-lg text-[11px] font-bold py-2.5 cursor-pointer"
-                          onClick={() => handleSettings(item.agentId)}
+                          onClick={() => handleSettings(item)}
                         >
                           <Settings className="w-3.5 h-3.5 mr-2" /> Thiết lập
                         </DropdownMenuItem>
@@ -356,8 +488,45 @@ export default function ToolsPage() {
               </DialogDescription>
             </DialogHeader>
 
+            {/* Bộ chọn Agent */}
+            <div className="bg-primary/5 border border-primary/20 rounded-2xl p-5 flex flex-col md:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
+                  <Bot className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm">Gán công cụ vào Agent</h4>
+                  <p className="text-[10px] text-muted-foreground font-medium">Chọn Agent bạn muốn thêm các công cụ bên dưới vào.</p>
+                </div>
+              </div>
+              <div className="w-full md:w-64">
+                <Select value={targetAgentId || ""} onValueChange={setTargetAgentId}>
+                  <SelectTrigger className="rounded-xl h-11 bg-white dark:bg-white/5 border-muted-foreground/20 font-bold w-full overflow-hidden">
+                    <span className="truncate">
+                      {targetAgentId ? (agents.find(a => a.id === targetAgentId)?.name || "Đang tải...") : "Chọn một Agent..."}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl border-muted-foreground/20 shadow-2xl">
+                    {agents.map(agent => (
+                      <SelectItem key={agent.id} value={agent.id} className="font-medium cursor-pointer">
+                        {agent.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
             <div className="space-y-10">
               {(() => {
+                const isToolInAgent = (toolName: string) => {
+                  if (!targetAgentId) return false;
+                  const agent = agents.find(a => a.id === targetAgentId);
+                  if (!agent) return false;
+                  const tools = Array.isArray(agent.tools) ? agent.tools : [];
+                  return tools.some((t: any) => (typeof t === 'string' ? t === toolName : t.name === toolName));
+                };
+
                 // Nhóm availableTools theo category
                 const groups = availableTools.reduce((acc, tool) => {
                   const cat = tool.category || "Cơ bản";
@@ -392,8 +561,33 @@ export default function ToolsPage() {
                             </div>
                           </div>
                           <div className="mt-4 pt-4 border-t border-muted/10 flex items-center justify-between">
-                            <span className="text-[9px] font-bold text-muted-foreground/50 font-mono tracking-wider">ID: {tool.name}</span>
-                            <Badge className="bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 border-none text-[8px] font-bold uppercase tracking-widest px-2 py-0.5">Sẵn sàng</Badge>
+                            <div className="flex flex-col">
+                              <span className="text-[9px] font-bold text-muted-foreground/50 font-mono tracking-wider uppercase">ID: {tool.name}</span>
+                              <Badge className="bg-emerald-500/10 text-emerald-600 border-none text-[7px] font-black uppercase tracking-widest px-1.5 py-0 mt-1 w-fit">Sẵn sàng</Badge>
+                            </div>
+                            <Button 
+                              size="sm" 
+                              className={cn(
+                                "h-8 rounded-xl gap-2 font-bold text-[11px] px-4 shadow-lg transition-all",
+                                isToolInAgent(tool.name) 
+                                  ? "bg-muted text-muted-foreground shadow-none cursor-default hover:bg-muted" 
+                                  : "shadow-primary/10"
+                              )}
+                              onClick={() => !isToolInAgent(tool.name) && handleAddToolToAgent(tool)}
+                              disabled={!targetAgentId}
+                            >
+                              {isToolInAgent(tool.name) ? (
+                                <>
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  Đã chọn
+                                </>
+                              ) : (
+                                <>
+                                  <Plus className="w-3.5 h-3.5" />
+                                  Thêm vào Agent
+                                </>
+                              )}
+                            </Button>
                           </div>
                         </div>
                       ))}
@@ -403,6 +597,266 @@ export default function ToolsPage() {
               })()}
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Cấu hình Công cụ nhanh */}
+      <Dialog open={showToolConfig} onOpenChange={setShowToolConfig}>
+        <DialogContent className="sm:max-w-[550px] rounded-[1.5rem] p-0 overflow-hidden border-none shadow-2xl">
+          <div className="bg-primary/5 p-8 border-b border-primary/10">
+            <div className="flex items-center gap-4 mb-2">
+              <div className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-800 flex items-center justify-center shadow-sm border border-primary/10">
+                {editingItem && getIcon(editingItem.name, editingItem.category)}
+              </div>
+              <div>
+                <DialogTitle className="text-xl font-bold">Thiết lập công cụ</DialogTitle>
+                <DialogDescription className="font-medium text-xs opacity-70 italic">
+                  Đang chỉnh sửa cho Agent: <span className="text-primary font-black">@{editingItem?.agentName}</span>
+                </DialogDescription>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Tên hiển thị (Label)</label>
+              <Input
+                placeholder="VD: Tìm kiếm dữ liệu nâng cao"
+                value={toolOverrideData.label}
+                onChange={(e) => setToolOverrideData({ ...toolOverrideData, label: e.target.value })}
+                className="rounded-xl h-12 border-muted-foreground/20 focus:ring-primary/20 bg-muted/5 font-medium"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Mô tả (Description)</label>
+              <textarea
+                placeholder="Mô tả cụ thể nhiệm vụ của công cụ này..."
+                value={toolOverrideData.description}
+                onChange={(e) => setToolOverrideData({ ...toolOverrideData, description: e.target.value })}
+                className="w-full rounded-xl min-h-[100px] p-4 border border-muted-foreground/20 focus:ring-2 focus:ring-primary/20 outline-none bg-muted/5 font-medium text-sm resize-none transition-all"
+              />
+            </div>
+
+            {/* Dynamic Parameter Form */}
+            {editingItem?.supported_params && editingItem.supported_params.length > 0 && (
+              <div className="space-y-5 pt-2">
+                <div className="flex items-center gap-2 ml-1">
+                  <Settings className="w-3.5 h-3.5 text-primary" />
+                  <label className="text-[11px] font-bold uppercase tracking-widest text-foreground">Cấu hình tham số</label>
+                </div>
+                
+                <div className="grid grid-cols-1 gap-5 p-5 bg-muted/20 rounded-2xl border border-muted-foreground/10">
+                  {editingItem.supported_params.map((param: any) => (
+                    <div key={param.key} className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <label className="text-xs font-bold text-foreground/80 ml-1">{param.label}</label>
+                        <span className="text-[10px] font-mono text-muted-foreground opacity-50 uppercase">{param.key}</span>
+                      </div>
+                      
+                      {param.type === "select" ? (
+                        <Select 
+                          value={editingItem.params?.[param.key] || param.default} 
+                          onValueChange={(val) => {
+                            if (!editingItem) return;
+                            const currentParams = editingItem.params || {};
+                            setEditingItem({ ...editingItem, params: { ...currentParams, [param.key]: val } });
+                          }}
+                        >
+                          <SelectTrigger className="rounded-xl h-10 bg-background border-muted-foreground/20">
+                            <SelectValue placeholder={`Chọn ${param.label.toLowerCase()}...`} />
+                          </SelectTrigger>
+                          <SelectContent className="rounded-xl border-muted-foreground/20">
+                            {param.options?.map((opt: any) => (
+                              <SelectItem key={opt.value} value={opt.value} className="text-xs font-medium">
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Input 
+                          type={param.type === "number" ? "number" : "text"}
+                          placeholder={param.desc || `Nhập ${param.label.toLowerCase()}...`}
+                          value={editingItem.params?.[param.key] ?? param.default}
+                          onChange={(e) => {
+                            if (!editingItem) return;
+                            const val = param.type === "number" ? parseInt(e.target.value) : e.target.value;
+                            const currentParams = editingItem.params || {};
+                            setEditingItem({ ...editingItem, params: { ...currentParams, [param.key]: val } });
+                          }}
+                          className="rounded-xl h-10 bg-background border-muted-foreground/20 text-xs font-medium"
+                        />
+                      )}
+                      {param.desc && <p className="text-[10px] text-muted-foreground italic ml-1">{param.desc}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Operational Settings */}
+            <div className="space-y-5 pt-4 border-t border-dashed border-muted-foreground/10">
+              <div className="flex items-center gap-2 ml-1">
+                <Bot className="w-3.5 h-3.5 text-primary" />
+                <label className="text-[11px] font-bold uppercase tracking-widest text-foreground">Cài đặt vận hành</label>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 p-5 bg-primary/[0.02] rounded-2xl border border-primary/10">
+                {/* Human in the loop */}
+                <div className="flex items-center justify-between p-1">
+                  <div className="space-y-0.5">
+                    <label className="text-xs font-bold text-foreground/80">Cần phê duyệt (Human-in-the-loop)</label>
+                    <p className="text-[10px] text-muted-foreground italic leading-none">Dừng lại và chờ bạn xác nhận trước khi thực thi công cụ.</p>
+                  </div>
+                  <div 
+                    className={cn(
+                      "w-10 h-5 rounded-full p-1 cursor-pointer transition-colors duration-300",
+                      editingItem?.params?.human_in_loop ? "bg-primary" : "bg-muted-foreground/20"
+                    )}
+                    onClick={() => {
+                      if (!editingItem) return;
+                      const currentParams = editingItem.params || {};
+                      setEditingItem({ ...editingItem, params: { ...currentParams, human_in_loop: !currentParams.human_in_loop } });
+                    }}
+                  >
+                    <div className={cn(
+                      "w-3 h-3 bg-white rounded-full transition-transform duration-300",
+                      editingItem?.params?.human_in_loop ? "translate-x-5" : "translate-x-0"
+                    )} />
+                  </div>
+                </div>
+
+                {/* Rate Limit */}
+                <div className="space-y-2 pt-2 border-t border-primary/5">
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs font-bold text-foreground/80">Giới hạn lượt gọi (Rate Limit)</label>
+                    <span className="text-[10px] font-medium text-muted-foreground opacity-70">lần/phút</span>
+                  </div>
+                  <Input 
+                    type="number"
+                    placeholder="Không giới hạn"
+                    value={editingItem?.params?.rate_limit || ""}
+                    onChange={(e) => {
+                      if (!editingItem) return;
+                      const val = e.target.value ? parseInt(e.target.value) : undefined;
+                      const currentParams = editingItem.params || {};
+                      setEditingItem({ ...editingItem, params: { ...currentParams, rate_limit: val } });
+                    }}
+                    className="rounded-xl h-10 bg-background border-muted-foreground/20 text-xs font-medium"
+                  />
+                  <p className="text-[10px] text-muted-foreground italic ml-1 leading-relaxed">
+                    Tránh việc Agent lặp lại tool quá nhiều lần hoặc vượt quá hạn ngạch API.
+                  </p>
+                </div>
+
+                {/* Run Limit */}
+                <div className="space-y-2 pt-2 border-t border-primary/5">
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs font-bold text-foreground/80">Giới hạn mỗi lượt (Run Limit)</label>
+                    <span className="text-[10px] font-medium text-muted-foreground opacity-70">lần/tin nhắn</span>
+                  </div>
+                  <Input 
+                    type="number"
+                    placeholder="Không giới hạn"
+                    value={editingItem?.params?.run_limit || ""}
+                    onChange={(e) => {
+                      if (!editingItem) return;
+                      const val = e.target.value ? parseInt(e.target.value) : undefined;
+                      const currentParams = editingItem.params || {};
+                      setEditingItem({ ...editingItem, params: { ...currentParams, run_limit: val } });
+                    }}
+                    className="rounded-xl h-10 bg-background border-muted-foreground/20 text-xs font-medium"
+                  />
+                </div>
+
+                {/* Thread Limit */}
+                <div className="space-y-2 pt-2 border-t border-primary/5">
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs font-bold text-foreground/80">Tổng giới hạn (Thread Limit)</label>
+                    <span className="text-[10px] font-medium text-muted-foreground opacity-70">lần/phiên</span>
+                  </div>
+                  <Input 
+                    type="number"
+                    placeholder="Không giới hạn"
+                    value={editingItem?.params?.thread_limit || ""}
+                    onChange={(e) => {
+                      if (!editingItem) return;
+                      const val = e.target.value ? parseInt(e.target.value) : undefined;
+                      const currentParams = editingItem.params || {};
+                      setEditingItem({ ...editingItem, params: { ...currentParams, thread_limit: val } });
+                    }}
+                    className="rounded-xl h-10 bg-background border-muted-foreground/20 text-xs font-medium"
+                  />
+                </div>
+              </div>
+            </div>
+
+            </div>
+            
+            <p className="text-[10px] text-muted-foreground italic ml-1 opacity-70">
+              * Lưu ý: Thay đổi này sẽ ảnh hưởng trực tiếp đến cách Agent nhận diện công cụ trong luồng suy nghĩ (Thinking).
+            </p>
+
+          <DialogFooter className="p-6 bg-muted/20 gap-3">
+            <Button
+              variant="ghost"
+              onClick={() => setShowToolConfig(false)}
+              className="rounded-xl h-11 px-6 font-bold"
+            >
+              Hủy bỏ
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!editingItem) return;
+                setIsSavingConfig(true);
+                const token = localStorage.getItem("access_token");
+                
+                try {
+                  const agentRes = await fetch(`http://localhost:8000/api/v1/agents/${editingItem.agentId}`, {
+                    headers: { "Authorization": `Bearer ${token}` }
+                  });
+                  const agent = await agentRes.json();
+
+                  const updatedTools = agent.tools.map((t: any) => {
+                    const tName = typeof t === "string" ? t : t.name;
+                    if (tName === editingItem.name) {
+                      return {
+                        ...(typeof t === "string" ? { name: t } : t),
+                        label: toolOverrideData.label,
+                        description: toolOverrideData.description,
+                        params: editingItem.params,
+                        is_active: true
+                      };
+                    }
+                    return t;
+                  });
+
+                  const res = await fetchWithAuth(`/agents/${editingItem.agentId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ tools: updatedTools })
+                  });
+
+                  if (res.ok) {
+                    addNotification("success", "Thành công", `Đã cập nhật cấu hình cho ${editingItem.name}`);
+                    setShowToolConfig(false);
+                    fetchData();
+                  } else {
+                    throw new Error("Failed to update tool config");
+                  }
+                } catch (error) {
+                  addNotification("error", "Lỗi", "Không thể lưu cấu hình công cụ.");
+                } finally {
+                  setIsSavingConfig(false);
+                }
+              }}
+              disabled={isSavingConfig}
+              className="rounded-xl h-11 px-8 font-bold bg-primary text-white shadow-lg shadow-primary/20"
+            >
+              {isSavingConfig ? "Đang lưu..." : "Cập nhật ngay"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

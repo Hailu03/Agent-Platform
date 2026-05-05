@@ -52,7 +52,10 @@ class GraphRAGSearchTool(BaseTool):
                 llm=llm_internal,
                 embedding_config=embedding_config,
                 chat_api_key=chat_api_key,
-                chat_provider=chat_provider
+                chat_provider=chat_provider,
+                agent_id=self.agent_config.get("id"),
+                agent_name=self.agent_config.get("name"),
+                collection_type="kb"
             )
             
             result = await service.query(query)

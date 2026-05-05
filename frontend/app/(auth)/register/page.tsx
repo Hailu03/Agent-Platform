@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Mail, Lock, User, ArrowLeft, CheckCircle2 } from "lucide-react";
 import { useGoogleLogin } from "@react-oauth/google";
 import { useRouter } from "next/navigation";
+import { useNotifications } from "@/hooks/use-notifications";
 
 const GoogleIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -14,10 +15,20 @@ const GoogleIcon = () => (
     <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.47 2.18 7.05l3.66 2.84c.87-2.6 3.3-4.51 6.16-4.51z" fill="#EA4335"/>
   </svg>
 );
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Eye, EyeOff } from "lucide-react";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    password: "",
+    confirmPassword: ""
+  });
 
   const login = useGoogleLogin({
     onSuccess: async (tokenResponse) => {
@@ -39,6 +50,43 @@ export default function RegisterPage() {
     },
   });
 
+  const { addNotification } = useNotifications();
+
+  const handleRegister = async () => {
+    if (!formData.name || !formData.email || !formData.password) {
+      addNotification("error", "Lỗi", "Vui lòng điền đầy đủ thông tin.");
+      return;
+    }
+
+    if (formData.password !== formData.confirmPassword) {
+      addNotification("error", "Lỗi", "Mật khẩu xác nhận không khớp!");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: formData.email,
+          full_name: formData.name,
+          password: formData.password
+        }),
+      });
+
+      if (response.ok) {
+        addNotification("success", "Thành công", "Tạo tài khoản thành công! Vui lòng đăng nhập.");
+        router.push("/login");
+      } else {
+        const errorData = await response.json();
+        addNotification("error", "Lỗi", errorData.detail || "Đăng ký thất bại.");
+      }
+    } catch (error) {
+      console.error("Registration error:", error);
+      addNotification("error", "Lỗi hệ thống", "Không thể kết nối đến máy chủ.");
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-background">
       {/* Decorative Background */}
@@ -58,7 +106,7 @@ export default function RegisterPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
-        <div className="text-center mb-10">
+        <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 font-bold text-2xl tracking-tighter mb-4">
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white text-base">W</div>
             WAO AI
@@ -77,7 +125,7 @@ export default function RegisterPage() {
             Đăng ký với Google
           </Button>
 
-          <div className="relative py-4">
+          <div className="relative py-2">
             <div className="absolute inset-0 flex items-center">
               <span className="w-full border-t" />
             </div>
@@ -94,6 +142,8 @@ export default function RegisterPage() {
                 <input 
                   type="text" 
                   placeholder="Nguyễn Văn A"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="w-full bg-secondary/30 border-2 border-transparent rounded-xl pl-10 pr-4 py-3 focus:border-primary/50 focus:bg-background outline-none transition-all"
                 />
               </div>
@@ -106,20 +156,54 @@ export default function RegisterPage() {
                 <input 
                   type="email" 
                   placeholder="name@company.com"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="w-full bg-secondary/30 border-2 border-transparent rounded-xl pl-10 pr-4 py-3 focus:border-primary/50 focus:bg-background outline-none transition-all"
                 />
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-semibold ml-1">Mật khẩu</label>
-              <div className="relative group">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                <input 
-                  type="password" 
-                  placeholder="Ít nhất 8 ký tự"
-                  className="w-full bg-secondary/30 border-2 border-transparent rounded-xl pl-10 pr-4 py-3 focus:border-primary/50 focus:bg-background outline-none transition-all"
-                />
+            <div className="grid grid-cols-1 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold ml-1">Mật khẩu</label>
+                <div className="relative group">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                  <input 
+                    type={showPassword ? "text" : "password"} 
+                    placeholder="Ít nhất 8 ký tự"
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    className="w-full bg-secondary/30 border-2 border-transparent rounded-xl pl-10 pr-12 py-3 focus:border-primary/50 focus:bg-background outline-none transition-all"
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold ml-1">Nhập lại mật khẩu</label>
+                <div className="relative group">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                  <input 
+                    type={showConfirmPassword ? "text" : "password"} 
+                    placeholder="Xác nhận mật khẩu"
+                    value={formData.confirmPassword}
+                    onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                    className="w-full bg-secondary/30 border-2 border-transparent rounded-xl pl-10 pr-12 py-3 focus:border-primary/50 focus:bg-background outline-none transition-all"
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -134,7 +218,10 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            <Button className="w-full h-12 rounded-xl font-bold text-lg shadow-lg shadow-green-500/20">
+            <Button 
+              className="w-full h-12 rounded-xl font-bold text-lg shadow-lg shadow-green-500/20"
+              onClick={handleRegister}
+            >
               Tạo tài khoản
             </Button>
           </div>

@@ -18,3 +18,4 @@ class AgentState(TypedDict):
     metadata: dict
     # Sẵn sàng cho Tool outputs, RAG context, v.v.
     context: dict 
+    tool_counts: dict # Theo dõi số lần gọi tool trong một run

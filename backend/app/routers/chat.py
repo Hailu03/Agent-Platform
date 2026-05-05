@@ -4,7 +4,7 @@ from app.models.base import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from app.repositories.agent_repo import AgentRepository
 from app.services.chat_service import ChatService
@@ -22,6 +22,7 @@ class ChatRequest(BaseModel):
     agent_id: str
     message: str
     history: List[Dict[str, str]] = []
+    command: Optional[Dict] = None # Cho phép null hoặc thiếu
 
 @router.post("/")
 async def chat(
@@ -33,7 +34,8 @@ async def chat(
     return await service.process_chat(
         request.agent_id, 
         current_user.id, 
-        request.message
+        request.message,
+        command=request.command
     )
 
 @router.post("/stream")
@@ -49,5 +51,6 @@ async def chat_stream(
     return await service.stream_chat(
         request.agent_id,
         current_user.id,
-        request.message
+        request.message,
+        command=request.command
     )

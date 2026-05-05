@@ -22,8 +22,27 @@ def setup_logging():
     logging.getLogger("uvicorn").setLevel(logging.INFO)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
-def get_logger(name: str) -> logging.Logger:
+import os
+
+def get_logger(name: str, log_file: str = None) -> logging.Logger:
     """
     Hàm tiện ích để lấy một logger với tên cụ thể.
+    Có thể tùy chọn xuất ra file.
     """
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    
+    if log_file:
+        # Đảm bảo thư mục log tồn tại
+        log_dir = os.path.dirname(log_file)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+            
+        # Kiểm tra xem đã có FileHandler chưa để tránh lặp
+        has_file_handler = any(isinstance(h, logging.FileHandler) and h.baseFilename == os.path.abspath(log_file) for h in logger.handlers)
+        
+        if not has_file_handler:
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+            logger.addHandler(file_handler)
+            
+    return logger

@@ -67,6 +67,17 @@ async def update_agent(
     if not agent:
         raise HTTPException(status_code=404, detail="Không tìm thấy Agent")
     return agent
+
+@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_agent(
+    agent_id: str,
+    service: AgentService = Depends(get_agent_service),
+    current_user: User = Depends(get_current_user)
+):
+    success = await service.delete_agent(agent_id, current_user.id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Không tìm thấy Agent để xóa")
+    return None
     
 @router.post("/upload")
 async def upload_knowledge_file(
@@ -105,20 +116,40 @@ class IndexRequest(BaseModel):
 @router.post("/index")
 async def trigger_indexing(
     req: IndexRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     Kích hoạt indexing cho một tài liệu cụ thể.
     """
+    api_key = req.api_key
+    emb_api_key = req.embedding_api_key
+    
+    def is_masked(val):
+        return val in ["********", "****"] or (val and "****" in str(val))
+
+    agent_name = "temp"
+    if req.agent_id != "temp":
+        from app.models.agent import Agent
+        result = await db.execute(select(Agent).where(Agent.id == req.agent_id))
+        agent = result.scalar_one_or_none()
+        if agent:
+            agent_name = agent.name
+            from app.core.security import decrypt_password
+            if is_masked(api_key):
+                api_key = decrypt_password(agent.api_key) if agent.api_key else None
+            if is_masked(emb_api_key):
+                emb_api_key = decrypt_password(agent.embedding_api_key) if agent.embedding_api_key else None
+
     task = process_document_task.delay(
         file_url=req.file_url,
         provider=req.provider,
         model_name=req.model_name,
-        api_key=req.api_key,
-        metadata={"filename": req.filename, "agent_id": req.agent_id},
+        api_key=api_key,
+        metadata={"filename": req.filename, "agent_id": req.agent_id, "agent_name": agent_name},
         embedding_provider=req.embedding_provider,
         embedding_model=req.embedding_model,
-        embedding_api_key=req.embedding_api_key
+        embedding_api_key=emb_api_key
     )
     return {"task_id": task.id, "status": "pending"}
 
@@ -140,3 +171,31 @@ async def list_available_tools(current_user: User = Depends(get_current_user)):
     Trả về danh sách các công cụ (tools) mà hệ thống hỗ trợ.
     """
     return get_available_tools()
+
+import os
+import mimetypes
+
+@router.get("/knowledge/presigned-url")
+async def get_knowledge_presigned_url(
+    object_name: str,
+    disposition: str = "inline",
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Tạo presigned URL để xem/tải tài liệu từ MinIO.
+    """
+    try:
+        content_type, _ = mimetypes.guess_type(object_name)
+        # Nếu là download, ép Content-Disposition thành attachment
+        final_disposition = disposition
+        if disposition == "attachment":
+            filename = os.path.basename(object_name)
+            final_disposition = f"attachment; filename={filename}"
+            
+        url = storage_service.get_presigned_url(object_name, response_type=content_type, disposition=final_disposition)
+        if not url:
+            raise HTTPException(status_code=404, detail="Không thể tạo URL cho tài liệu này")
+        return {"url": url}
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi tạo presigned URL: {str(e)}")
+        raise HTTPException(status_code=500, detail="Lỗi hệ thống khi truy cập kho lưu trữ")
