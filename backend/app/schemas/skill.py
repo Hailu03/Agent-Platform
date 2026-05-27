@@ -1,5 +1,6 @@
-from pydantic import BaseModel
-from typing import Optional
+import json
+from pydantic import BaseModel, field_validator
+from typing import Optional, Any
 from datetime import datetime
 
 class SkillBase(BaseModel):
@@ -23,6 +24,22 @@ class SkillResponse(SkillBase):
     user_id: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+    @field_validator("required_tools", mode="before")
+    @classmethod
+    def _coerce_required_tools(cls, value: Any):
+        # Backward/bug compatibility: some rows may store JSON as string.
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else None
+            except Exception:
+                return None
+        return None
 
     class Config:
         from_attributes = True

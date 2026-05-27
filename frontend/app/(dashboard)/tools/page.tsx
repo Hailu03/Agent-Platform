@@ -103,6 +103,7 @@ export default function ToolsPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [availableTools, setAvailableTools] = useState<AvailableTool[]>([]);
+  const [availableToolSearch, setAvailableToolSearch] = useState("");
 
   // State cho việc gỡ bỏ và khám phá
   const [isDeleting, setIsDeleting] = useState(false);
@@ -314,6 +315,15 @@ export default function ToolsPage() {
     return nameMatch || agentMatch;
   });
 
+  const filteredAvailableTools = availableTools.filter((tool) => {
+    const keyword = availableToolSearch.trim().toLowerCase();
+    if (!keyword) return true;
+
+    return [tool.name, tool.label, tool.description, tool.category]
+      .filter((value): value is string => Boolean(value))
+      .some((value) => value.toLowerCase().includes(keyword));
+  });
+
   const getIcon = (name: string, category?: string) => {
     const n = name.toLowerCase();
     if (category === "Gmail" || n.includes("gmail")) {
@@ -518,6 +528,16 @@ export default function ToolsPage() {
             </div>
 
             <div className="space-y-10">
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Tìm theo tên tool, ID hoặc mô tả..."
+                  className="pl-11 h-12 rounded-2xl bg-white dark:bg-white/5 border-muted-foreground/20"
+                  value={availableToolSearch}
+                  onChange={(e) => setAvailableToolSearch(e.target.value)}
+                />
+              </div>
+
               {(() => {
                 const isToolInAgent = (toolName: string) => {
                   if (!targetAgentId) return false;
@@ -527,13 +547,20 @@ export default function ToolsPage() {
                   return tools.some((t: any) => (typeof t === 'string' ? t === toolName : t.name === toolName));
                 };
 
-                // Nhóm availableTools theo category
-                const groups = availableTools.reduce((acc, tool) => {
+                const groups = filteredAvailableTools.reduce((acc, tool) => {
                   const cat = tool.category || "Cơ bản";
                   if (!acc[cat]) acc[cat] = [];
                   acc[cat].push(tool);
                   return acc;
                 }, {} as Record<string, AvailableTool[]>);
+
+                if (Object.keys(groups).length === 0) {
+                  return (
+                    <div className="rounded-2xl border border-dashed border-muted-foreground/20 p-10 text-center">
+                      <p className="text-sm font-semibold text-muted-foreground">Không tìm thấy tool nào khớp.</p>
+                    </div>
+                  );
+                }
 
                 return Object.entries(groups).map(([category, tools]) => (
                   <div key={category} className="space-y-5">

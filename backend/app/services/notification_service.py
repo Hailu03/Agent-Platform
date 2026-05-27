@@ -78,8 +78,15 @@ class NotificationService:
         
         if cursor:
             # Lấy thông báo cũ hơn cursor (Timestamp)
-            cursor_dt = datetime.fromisoformat(cursor)
-            query = query.where(Notification.created_at < cursor_dt)
+            # Fix: URL thường biến '+' thành ' ' (khoảng trắng)
+            clean_cursor = cursor.replace(" ", "+")
+            try:
+                cursor_dt = datetime.fromisoformat(clean_cursor)
+                query = query.where(Notification.created_at < cursor_dt)
+            except ValueError:
+                logger.error(f"❌ Invalid notification cursor format: {cursor}")
+                # Nếu lỗi format, bỏ qua cursor để lấy trang đầu
+                pass
         
         if type:
             query = query.where(Notification.type == type)
@@ -146,3 +153,46 @@ class NotificationService:
         )
         await self.db.commit()
         return {"success": True}
+
+    async def send_notification(
+        self, 
+        user_id: str, 
+        title: str, 
+        message: str, 
+        type: str = "INFO",
+        metadata: Optional[dict] = None
+    ):
+        """Phiên bản gọn nhẹ để gửi thông báo real-time qua SSE/Redis mà không nhất thiết cần DB session."""
+        notification_data = {
+            "id": str(uuid.uuid4()),
+            "type": type,
+            "title": title,
+            "message": message,
+            "link": None,
+            "created_at": datetime.now().isoformat(),
+            "is_read": False,
+            "metadata": metadata
+        }
+        
+        # Channel name format: user_notifications:{user_id}
+        channel = f"user_notifications:{user_id}"
+        await self.redis.publish(channel, json.dumps(notification_data))
+        
+        # Nếu có DB, lưu vào DB luôn (Tùy chọn)
+        if self.db:
+            try:
+                db_notification = Notification(
+                    id=notification_data["id"],
+                    user_id=user_id,
+                    type=type,
+                    title=title,
+                    message=message,
+                    data=metadata
+                )
+                self.db.add(db_notification)
+                await self.db.commit()
+            except Exception as e:
+                logger.error(f"⚠️ Lỗi lưu thông báo vào DB: {e}")
+
+# Export a singleton instance
+notification_service = NotificationService(None)

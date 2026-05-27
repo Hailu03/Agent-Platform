@@ -121,6 +121,63 @@
   @apply bg-clip-text text-transparent bg-gradient-to-r from-green-600 to-green-400;
 }
 
+@keyframes landing-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes landing-type {
+  0%,
+  12% {
+    width: 0;
+  }
+  48%,
+  78% {
+    width: 58ch;
+  }
+  100% {
+    width: 0;
+  }
+}
+
+@keyframes landing-type-mobile {
+  0%,
+  12% {
+    width: 0;
+  }
+  50%,
+  78% {
+    width: 30ch;
+  }
+  100% {
+    width: 0;
+  }
+}
+
+@keyframes landing-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes landing-shimmer {
+  from {
+    transform: translateX(-35%);
+  }
+  to {
+    transform: translateX(35%);
+  }
+}
+
 /* Markdown Preview Styles */
 .markdown-preview {
   line-height: 1.6;
@@ -241,27 +298,31 @@
 
 /* Custom Scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(0, 0, 0, 0.02);
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.2);
   border-radius: 20px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.4);
+  background-clip: content-box;
 }
 
 .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.4);
+  background-clip: content-box;
 }

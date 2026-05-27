@@ -11,7 +11,14 @@ class Conversation(Base):
     agent_id = Column(String, ForeignKey("agents.id"), index=True, nullable=False)
     thread_id = Column(String, index=True, nullable=False) # LangGraph Thread ID
     title = Column(String, nullable=True)
-    last_message = Column(String, nullable=True)
+    message = Column(String, nullable=True)
+    thinking = Column(String, nullable=True)
+    role = Column(String, nullable=True) # "user" or "assistant"
+    
+    # New observability fields
+    metrics = Column(JSON, nullable=True)
+    audit = Column(JSON, nullable=True)
+    artifacts = Column(JSON, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

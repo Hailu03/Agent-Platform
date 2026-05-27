@@ -10,6 +10,8 @@ import {
   Plug2, 
   Wrench,
   Hammer,
+  ShieldCheck,
+  BarChart3,
   ChevronDown, 
   ChevronRight, 
   FileText,
@@ -67,6 +69,8 @@ export function Sidebar() {
     { name: "Workflows", href: "/workflows", icon: GitBranch },
     { name: "Skills", href: "/skills", icon: Wrench },
     { name: "Tools", href: "/tools", icon: Hammer },
+    { name: "Fanpage", href: "/fanpage", icon: BarChart3 },
+    { name: "Guardrails", href: "/guardrails", icon: ShieldCheck },
     { name: "Connectors", href: "/connectors", icon: Plug2 },
   ];
 

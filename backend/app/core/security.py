@@ -100,5 +100,15 @@ def encrypt_password(password: str) -> str:
     return f.encrypt(password.encode()).decode()
 
 def decrypt_password(encrypted_password: str) -> str:
-    f = get_fernet()
-    return f.decrypt(encrypted_password.encode()).decode()
+    if not encrypted_password:
+        return ""
+    # Nếu không có dấu hiệu của Fernet (thường bắt đầu bằng gAAAA), có thể là plain text
+    if not encrypted_password.startswith("gAAAA"):
+        return encrypted_password
+        
+    try:
+        f = get_fernet()
+        return f.decrypt(encrypted_password.encode()).decode()
+    except Exception:
+        # Nếu giải mã lỗi, trả về nguyên bản để tránh mất dữ liệu hoặc lỗi chuỗi dài
+        return encrypted_password

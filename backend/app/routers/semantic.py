@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 from app.models.base import get_db
 from app.models.semantic import SemanticColumn, SemanticTable, SemanticRelationship, SemanticMetric, SemanticCalculationGroup
@@ -30,15 +30,23 @@ async def get_schema(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # 1. Fetch tables with columns using JOINED load for maximum reliability
     result = await db.execute(
         select(SemanticTable)
         .where(SemanticTable.datasource_id == datasource_id)
-        .options(selectinload(SemanticTable.columns))
+        .options(joinedload(SemanticTable.columns))
         .order_by(SemanticTable.name)
     )
-    tables = result.scalars().all()
+    tables = result.unique().scalars().all()
+    
+    # Debug log
+    for t in tables:
+        logger.info(f"📊 Table: {t.name} | Columns found: {len(t.columns)}")
 
-    # Fetch relationships
+    # 2. Fetch relationships
     rels_result = await db.execute(
         select(SemanticRelationship).where(SemanticRelationship.datasource_id == datasource_id)
     )

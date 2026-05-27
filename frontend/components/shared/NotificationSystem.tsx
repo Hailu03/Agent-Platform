@@ -35,6 +35,15 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   // 1. Fetch notifications with filter
   const fetchNotifications = useCallback(async (isLoadMore = false) => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    if (!token) {
+      setNotifications([]);
+      setUnreadCount(0);
+      setCursor(null);
+      setHasMore(false);
+      return;
+    }
+
     setIsLoading(true);
     try {
       let url = `/notifications/?limit=20`;
@@ -166,7 +175,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     };
   }, [activeFilter]);
 
-  const addNotification = (type: NotificationType, title: string, message: string) => {
+  const addNotification = useCallback((type: NotificationType, title: string, message: string) => {
     const newNotif: Notification = {
       id: Math.random().toString(36).substring(2, 9),
       type,
@@ -179,7 +188,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== newNotif.id));
     }, 4000);
-  };
+  }, []);
 
   return (
     <NotificationContext.Provider value={{ 

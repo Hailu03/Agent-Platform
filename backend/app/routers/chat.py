@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.base import get_db
 from app.core.security import get_current_user
@@ -75,3 +75,34 @@ async def get_thread_history(
 ):
     """Lấy lịch sử tin nhắn của một thread"""
     return await service.get_thread_history(thread_id, current_user.id)
+
+@router.get("/audit/{thread_id}")
+async def get_thread_audit(
+    thread_id: str,
+    service: ChatService = Depends(get_chat_service),
+    current_user: User = Depends(get_current_user)
+):
+    """Lấy luồng thực thi (audit log) của một thread"""
+    return await service.get_thread_audit(thread_id, current_user.id)
+
+@router.delete("/conversations/{thread_id}")
+async def delete_conversation(
+    thread_id: str,
+    service: ChatService = Depends(get_chat_service),
+    current_user: User = Depends(get_current_user)
+):
+    """Xóa sạch một phiên hội thoại"""
+    return await service.delete_conversation(thread_id, current_user.id)
+
+@router.patch("/conversations/{thread_id}/title")
+async def update_conversation_title(
+    thread_id: str,
+    payload: Dict[str, str],
+    service: ChatService = Depends(get_chat_service),
+    current_user: User = Depends(get_current_user)
+):
+    """Cập nhật tiêu đề hội thoại thủ công"""
+    new_title = payload.get("title")
+    if not new_title:
+        raise HTTPException(status_code=400, detail="Title is required")
+    return await service.update_conversation_title(thread_id, current_user.id, new_title)

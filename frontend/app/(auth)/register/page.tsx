@@ -31,12 +31,14 @@ export default function RegisterPage() {
   });
 
   const login = useGoogleLogin({
-    onSuccess: async (tokenResponse) => {
+    flow: "auth-code",
+    scope: "openid email profile",
+    onSuccess: async (codeResponse) => {
       try {
         const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/google`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id_token: tokenResponse.access_token }),
+          body: JSON.stringify({ code: codeResponse.code }),
         });
 
         if (response.ok) {

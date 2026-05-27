@@ -29,7 +29,7 @@ export default function LoginPage() {
 
   const login = useGoogleLogin({
     flow: "auth-code",
-    scope: "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
+    scope: "openid email profile",
     onSuccess: async (codeResponse) => {
       try {
         const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/google`, {

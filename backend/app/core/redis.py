@@ -161,6 +161,46 @@ class SemanticCache:
         except Exception as e:
             logger.error(f"❌ Lỗi Semantic Cache Set: {e}")
 
+    def clear_chat_cache(self, agent_db: Any, thread_id: str, user_id: str):
+        """Xóa sạch cache của một thread trong Redis và Qdrant."""
+        try:
+            collection_name = self._get_collection_name(agent_db)
+            
+            # 1. Tìm tất cả các points thuộc thread_id
+            search_result = self.qdrant.scroll(
+                collection_name=collection_name,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(key="thread_id", match=models.MatchValue(value=thread_id)),
+                        models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))
+                    ]
+                ),
+                limit=100,
+                with_payload=True,
+                with_vectors=False
+            )[0]
+            
+            if search_result:
+                # 2. Xóa các key trong Redis
+                cache_keys = [p.payload["cache_key"] for p in search_result if "cache_key" in p.payload]
+                if cache_keys:
+                    self.redis.delete(*cache_keys)
+                    logger.info(f"🗑️ Đã xóa {len(cache_keys)} cache keys trong Redis.")
+                
+                # 3. Xóa các points trong Qdrant
+                self.qdrant.delete(
+                    collection_name=collection_name,
+                    points_selector=models.Filter(
+                        must=[
+                            models.FieldCondition(key="thread_id", match=models.MatchValue(value=thread_id)),
+                            models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))
+                        ]
+                    )
+                )
+                logger.info(f"🗑️ Đã xóa cache vectors trong Qdrant collection {collection_name} cho Thread {thread_id}")
+        except Exception as e:
+            logger.error(f"❌ Lỗi Clear Chat Cache: {e}")
+
 redis_cache = SemanticCache()
 
 # Global Async Redis Client for SSE/PubSub

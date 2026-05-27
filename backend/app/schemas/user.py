@@ -22,6 +22,8 @@ class UserResponse(UserBase):
     is_active: bool
     is_verified: bool
     is_google_connected: bool = False
+    is_google_tool_connected: bool = False
+    is_facebook_connected: bool = False
     created_at: datetime
 
     class Config:

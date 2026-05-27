@@ -3,7 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.models.base import engine, Base
-from .routers import auth, agent, chat, skill, connections, semantic, notifications
+from app.core.db_migrations import run_startup_migrations
+from .routers import auth, agent, chat, skill, connections, semantic, notifications, guardrails, meta
+from app.models import facebook_assets  # noqa: F401 - ensure Meta/Facebook tables are registered
 from app.core.logging import setup_logging
 
 # Khởi tạo logging
@@ -14,7 +16,10 @@ async def lifespan(app: FastAPI):
     # Tạo bảng nếu chưa tồn tại
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await run_startup_migrations(conn)
     yield
+    # Dọn dẹp tài nguyên khi tắt/reload
+    await engine.dispose()
 
 app = FastAPI(
     title="WAO AI API",
@@ -31,6 +36,8 @@ app.include_router(connections.router, prefix="/api/v1")
 app.include_router(semantic.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1/chat")
 app.include_router(notifications.router, prefix="/api/v1")
+app.include_router(guardrails.router, prefix="/api/v1")
+app.include_router(meta.router, prefix="/api/v1")
 
 # CORS configuration
 app.add_middleware(

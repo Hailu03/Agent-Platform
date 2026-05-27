@@ -7,21 +7,168 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from app.core.config import settings
 from app.models.base import get_db
+from app.models.facebook_connection import FacebookConnection
+from app.models.google_tool_connection import GoogleToolConnection
 from app.models.user import User
 from app.schemas.user import UserCreate, UserLogin, UserResponse, Token, GoogleLogin
-from app.core.security import create_access_token, create_refresh_token, verify_password, get_password_hash, get_current_user
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decrypt_password,
+    encrypt_password,
+    verify_password,
+    get_password_hash,
+    get_current_user,
+)
 from fastapi.responses import RedirectResponse
 import urllib.parse
 from app.core.logging import get_logger
+from datetime import datetime, timedelta, timezone
+from pydantic import BaseModel
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+GOOGLE_BASIC_SCOPES = "openid email profile"
+GOOGLE_GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.send",
+]
+
+
+async def exchange_facebook_code_for_short_lived_token(code: str) -> dict:
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://graph.facebook.com/{settings.META_GRAPH_VERSION}/oauth/access_token",
+            params={
+                "client_id": settings.FACEBOOK_APP_ID,
+                "client_secret": settings.FACEBOOK_APP_SECRET,
+                "redirect_uri": settings.FACEBOOK_REDIRECT_URI,
+                "code": code,
+            },
+        )
+        if resp.status_code != 200:
+            logger.error(f"Facebook short-lived token exchange failed: {resp.text}")
+            raise HTTPException(status_code=400, detail="Không thể trao đổi Facebook authorization code.")
+        return resp.json()
+
+
+async def exchange_for_long_lived_user_token(short_lived_token: str) -> dict:
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://graph.facebook.com/{settings.META_GRAPH_VERSION}/oauth/access_token",
+            params={
+                "grant_type": "fb_exchange_token",
+                "client_id": settings.FACEBOOK_APP_ID,
+                "client_secret": settings.FACEBOOK_APP_SECRET,
+                "fb_exchange_token": short_lived_token,
+            },
+        )
+        if resp.status_code != 200:
+            logger.error(f"Facebook long-lived token exchange failed: {resp.text}")
+            raise HTTPException(status_code=400, detail="Không thể đổi sang Facebook long-lived token.")
+        return resp.json()
+
+
+async def fetch_facebook_profile_and_pages(user_token: str) -> tuple[dict, list[dict]]:
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        profile_resp = await client.get(
+            f"https://graph.facebook.com/{settings.META_GRAPH_VERSION}/me",
+            params={"fields": "id,name", "access_token": user_token},
+        )
+        if profile_resp.status_code != 200:
+            logger.error(f"Facebook profile fetch failed: {profile_resp.text}")
+            raise HTTPException(status_code=400, detail="Không thể lấy hồ sơ Facebook user.")
+
+        pages_resp = await client.get(
+            f"https://graph.facebook.com/{settings.META_GRAPH_VERSION}/me/accounts",
+            params={"fields": "id,name,access_token,category,tasks", "access_token": user_token},
+        )
+        if pages_resp.status_code != 200:
+            logger.error(f"Facebook pages fetch failed: {pages_resp.text}")
+            raise HTTPException(status_code=400, detail="Không thể lấy danh sách Facebook Pages.")
+
+        pages = []
+        for page in pages_resp.json().get("data", []):
+            pages.append(
+                {
+                    "id": page.get("id"),
+                    "name": page.get("name"),
+                    "category": page.get("category"),
+                    "tasks": page.get("tasks", []),
+                    "access_token": encrypt_password(page.get("access_token") or ""),
+                }
+            )
+        return profile_resp.json(), pages
+
+
+async def upsert_facebook_connection(
+    db: AsyncSession,
+    user_id: str,
+    profile: dict,
+    pages: list[dict],
+    long_lived_token: str,
+    expires_in: int,
+    scopes: list[str],
+) -> FacebookConnection:
+    result = await db.execute(select(FacebookConnection).where(FacebookConnection.user_id == user_id))
+    connection = result.scalars().first()
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in or 60 * 24 * 60 * 60)
+    selected_page = pages[0] if pages else None
+
+    if connection is None:
+        connection = FacebookConnection(id=str(uuid.uuid4()), user_id=user_id)
+        db.add(connection)
+
+    connection.facebook_user_id = profile.get("id")
+    connection.facebook_user_name = profile.get("name")
+    connection.long_lived_user_token = encrypt_password(long_lived_token)
+    connection.user_token_expires_at = expires_at
+    connection.scopes = scopes
+    connection.pages = pages
+    connection.graph_version = settings.META_GRAPH_VERSION
+    connection.token_health = {"status": "ok", "checked_at": datetime.now(timezone.utc).isoformat()}
+    connection.status = "active"
+    connection.last_token_check_at = datetime.now(timezone.utc)
+    connection.last_successful_api_at = datetime.now(timezone.utc)
+
+    if selected_page and (not connection.selected_page_id or not any(page.get("id") == connection.selected_page_id for page in pages)):
+        connection.selected_page_id = selected_page.get("id")
+        connection.selected_page_name = selected_page.get("name")
+        connection.selected_page_access_token = selected_page.get("access_token")
+    elif connection.selected_page_id:
+        matched_page = next((page for page in pages if page.get("id") == connection.selected_page_id), None)
+        if matched_page:
+            connection.selected_page_name = matched_page.get("name")
+            connection.selected_page_access_token = matched_page.get("access_token")
+
+    await db.commit()
+    await db.refresh(connection)
+    return connection
+
 @router.get("/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)):
+async def get_me(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     user_data = UserResponse.model_validate(current_user)
-    user_data.is_google_connected = bool(current_user.google_refresh_token)
+    google_result = await db.execute(
+        select(GoogleToolConnection).where(GoogleToolConnection.user_id == current_user.id)
+    )
+    google_connection = google_result.scalars().first()
+    user_data.is_google_connected = bool(
+        google_connection and (google_connection.refresh_token or google_connection.access_token)
+    )
+    user_data.is_google_tool_connected = user_data.is_google_connected
+    result = await db.execute(select(FacebookConnection).where(FacebookConnection.user_id == current_user.id))
+    fb_connection = result.scalars().first()
+    user_data.is_facebook_connected = bool(
+        fb_connection and fb_connection.selected_page_access_token and fb_connection.status == "active"
+    )
     return user_data
 
 @router.post("/register", response_model=UserResponse)
@@ -92,14 +239,11 @@ async def google_auth(
     email = None
     full_name = None
     google_id = None
-    google_access_token = None
-    google_refresh_token = None
-    google_token_expiry = None
     
     import httpx
     
     if login_data.code:
-        # 1. Trao đổi code lấy tokens (bao gồm cả refresh_token nếu scope đủ)
+        # 1. Trao đổi code lấy access token cho đăng nhập OAuth cơ bản
         async with httpx.AsyncClient() as client:
             token_resp = await client.post(
                 "https://oauth2.googleapis.com/token",
@@ -115,10 +259,6 @@ async def google_auth(
             if token_resp.status_code == 200:
                 tokens = token_resp.json()
                 google_access_token = tokens.get("access_token")
-                google_refresh_token = tokens.get("refresh_token")
-                expires_in = tokens.get("expires_in", 3600)
-                from datetime import datetime, timedelta, timezone
-                google_token_expiry = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
                 
                 # 2. Lấy info user từ Google
                 info_resp = await client.get(
@@ -181,19 +321,12 @@ async def google_auth(
             hashed_password=None,
             is_active=True,
             is_verified=True,
-            google_id=google_id,
-            google_access_token=google_access_token,
-            google_refresh_token=google_refresh_token,
-            google_token_expiry=google_token_expiry
+            google_id=google_id
         )
         db.add(user)
     else:
-        # Cập nhật tokens nếu có
-        if google_access_token:
-            user.google_access_token = google_access_token
-            if google_refresh_token:
-                user.google_refresh_token = google_refresh_token
-            user.google_token_expiry = google_token_expiry
+        if google_id and not user.google_id:
+            user.google_id = google_id
             
     await db.commit()
     await db.refresh(user)
@@ -219,7 +352,7 @@ async def google_auth(
  
 @router.get("/google/connect")
 async def google_connect(agent_id: str = None, current_user: User = Depends(get_current_user)):
-    """Trả về URL OAuth2 để kết nối Gmail"""
+    """Trả về URL OAuth2 để kết nối Gmail cho tool Google."""
     # Lưu cả user_id và agent_id vào state để quay lại đúng trang
     state = current_user.id
     if agent_id:
@@ -229,7 +362,7 @@ async def google_connect(agent_id: str = None, current_user: User = Depends(get_
         "client_id": settings.GOOGLE_CLIENT_ID,
         "redirect_uri": settings.GOOGLE_REDIRECT_URI,
         "response_type": "code",
-        "scope": "openid email profile https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
+        "scope": " ".join([GOOGLE_BASIC_SCOPES, *GOOGLE_GMAIL_SCOPES]),
         "access_type": "offline",
         "prompt": "consent",
         "state": state
@@ -239,7 +372,7 @@ async def google_connect(agent_id: str = None, current_user: User = Depends(get_
 
 @router.get("/google/callback")
 async def google_callback(code: str, state: str, db: AsyncSession = Depends(get_db)):
-    """Xử lý callback từ Google và lưu tokens"""
+    """Xử lý callback từ Google và lưu tool connection Gmail tách biệt khỏi User."""
     import httpx
     
     # 1. Trao đổi code lấy tokens
@@ -264,7 +397,7 @@ async def google_callback(code: str, state: str, db: AsyncSession = Depends(get_
         refresh_token = tokens.get("refresh_token")
         expires_in = tokens.get("expires_in", 3600)
         
-        # 2. Cập nhật User trong DB
+        # 2. Cập nhật Google tool connection trong DB
         # Parse state để lấy user_id và agent_id
         user_id = state
         agent_id = None
@@ -274,19 +407,191 @@ async def google_callback(code: str, state: str, db: AsyncSession = Depends(get_
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalars().first()
         if user:
-            user.google_access_token = access_token
-            if refresh_token: # Google chỉ gửi refresh_token lần đầu hoặc khi prompt=consent
-                user.google_refresh_token = refresh_token
-            from datetime import datetime, timedelta, timezone
-            user.google_token_expiry = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+            profile_resp = await client.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            profile = profile_resp.json() if profile_resp.status_code == 200 else {}
+
+            connection_result = await db.execute(
+                select(GoogleToolConnection).where(GoogleToolConnection.user_id == user_id)
+            )
+            connection = connection_result.scalars().first()
+            if connection is None:
+                connection = GoogleToolConnection(id=str(uuid.uuid4()), user_id=user_id)
+                db.add(connection)
+
+            connection.google_account_id = profile.get("sub") or user.google_id
+            connection.google_account_email = profile.get("email") or user.email
+            connection.access_token = access_token
+            if refresh_token:
+                connection.refresh_token = refresh_token
+            connection.token_expiry = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+            connection.scopes = GOOGLE_GMAIL_SCOPES
+            connection.status = "active"
             await db.commit()
             
     # 3. Quay lại trang cấu hình Agent
-    redirect_url = f"{settings.ALLOWED_ORIGINS}/agents/create?google_connected=success"
+    redirect_url = f"{settings.ALLOWED_ORIGINS}/agents/create?google_tool_connected=success"
     if agent_id:
-        redirect_url = f"{settings.ALLOWED_ORIGINS}/agents/create?id={agent_id}&google_connected=success"
+        redirect_url = f"{settings.ALLOWED_ORIGINS}/agents/create?id={agent_id}&google_tool_connected=success"
         
     return RedirectResponse(redirect_url)
+
+
+@router.get("/facebook/connect")
+async def facebook_connect(agent_id: str = None, current_user: User = Depends(get_current_user)):
+    if not settings.FACEBOOK_APP_ID or not settings.FACEBOOK_APP_SECRET:
+        raise HTTPException(status_code=400, detail="FACEBOOK_APP_ID/FACEBOOK_APP_SECRET chưa được cấu hình.")
+
+    state = current_user.id
+    if agent_id:
+        state = f"{current_user.id}:{agent_id}"
+
+    params = {
+        "client_id": settings.FACEBOOK_APP_ID,
+        "redirect_uri": settings.FACEBOOK_REDIRECT_URI,
+        "state": state,
+        "response_type": "code",
+        "scope": ",".join(
+            [
+                "pages_show_list",
+                "pages_read_engagement",
+                "pages_manage_posts",
+                "pages_manage_engagement",
+                "pages_messaging",
+                "pages_manage_metadata",
+            ]
+        ),
+    }
+    url = f"https://www.facebook.com/{settings.META_GRAPH_VERSION}/dialog/oauth?{urllib.parse.urlencode(params)}"
+    return {"url": url}
+
+
+@router.get("/facebook/callback")
+async def facebook_callback(code: str, state: str, db: AsyncSession = Depends(get_db)):
+    user_id = state
+    agent_id = None
+    if ":" in state:
+        user_id, agent_id = state.split(":", 1)
+
+    short_lived = await exchange_facebook_code_for_short_lived_token(code)
+    short_lived_token = short_lived.get("access_token")
+    if not short_lived_token:
+        raise HTTPException(status_code=400, detail="Facebook không trả về access token.")
+
+    long_lived = await exchange_for_long_lived_user_token(short_lived_token)
+    long_lived_token = long_lived.get("access_token")
+    expires_in = long_lived.get("expires_in", 60 * 24 * 60 * 60)
+
+    profile, pages = await fetch_facebook_profile_and_pages(long_lived_token)
+
+    await upsert_facebook_connection(
+        db=db,
+        user_id=user_id,
+        profile=profile,
+        pages=pages,
+        long_lived_token=long_lived_token,
+        expires_in=expires_in,
+        scopes=[
+            "pages_show_list",
+            "pages_read_engagement",
+            "pages_manage_posts",
+            "pages_manage_engagement",
+            "pages_messaging",
+            "pages_manage_metadata",
+        ],
+    )
+
+    redirect_url = f"{settings.ALLOWED_ORIGINS}/agents/create?facebook_connected=success"
+    if agent_id:
+        redirect_url = f"{settings.ALLOWED_ORIGINS}/agents/create?id={agent_id}&facebook_connected=success"
+    return RedirectResponse(redirect_url)
+
+
+@router.get("/facebook/status")
+async def facebook_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(FacebookConnection).where(FacebookConnection.user_id == current_user.id))
+    connection = result.scalars().first()
+    if not connection:
+        return {
+            "connected": False,
+            "status": "not_connected",
+            "selected_page_id": None,
+            "selected_page_name": None,
+            "pages_count": 0,
+        }
+
+    return {
+        "connected": bool(connection.selected_page_access_token and connection.status == "active"),
+        "status": connection.status,
+        "selected_page_id": connection.selected_page_id,
+        "selected_page_name": connection.selected_page_name,
+        "pages_count": len(connection.pages or []),
+        "expires_at": connection.user_token_expires_at,
+    }
+
+
+@router.get("/facebook/pages")
+async def facebook_pages(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(FacebookConnection).where(FacebookConnection.user_id == current_user.id))
+    connection = result.scalars().first()
+    if not connection:
+        raise HTTPException(status_code=404, detail="Bạn chưa kết nối Facebook.")
+
+    return {
+        "status": connection.status,
+        "selected_page_id": connection.selected_page_id,
+        "selected_page_name": connection.selected_page_name,
+        "graph_version": connection.graph_version,
+        "token_health": connection.token_health,
+        "last_sync_at": connection.last_sync_at,
+        "pages": [
+            {k: v for k, v in page.items() if k != "access_token"}
+            for page in (connection.pages or [])
+        ],
+    }
+
+
+class FacebookSelectPageRequest(BaseModel):
+    page_id: str
+
+
+@router.post("/facebook/select-page")
+async def facebook_select_page(
+    payload: FacebookSelectPageRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(FacebookConnection).where(FacebookConnection.user_id == current_user.id))
+    connection = result.scalars().first()
+    if not connection:
+        raise HTTPException(status_code=404, detail="Bạn chưa kết nối Facebook.")
+
+    matched_page = next((page for page in (connection.pages or []) if page.get("id") == payload.page_id), None)
+    if not matched_page:
+        raise HTTPException(status_code=404, detail="Không tìm thấy Facebook Page đã chọn.")
+
+    connection.selected_page_id = matched_page.get("id")
+    connection.selected_page_name = matched_page.get("name")
+    connection.selected_page_access_token = matched_page.get("access_token")
+    connection.status = "active"
+    connection.last_successful_api_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(connection)
+
+    return {
+        "success": True,
+        "selected_page_id": connection.selected_page_id,
+        "selected_page_name": connection.selected_page_name,
+    }
 
 @router.post("/logout")
 async def logout(response: Response):

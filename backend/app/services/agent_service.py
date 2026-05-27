@@ -1,7 +1,10 @@
 from app.repositories.agent_repo import AgentRepository
 from app.models.agent import Agent
+from app.models.skill import Skill
 from app.schemas.agent import AgentCreate, AgentUpdate
 import uuid
+import json
+from sqlalchemy import select
 
 from app.services.notification_service import NotificationService
 from app.models.notification import NotificationType
@@ -49,10 +52,15 @@ class AgentService:
         from app.core.security import encrypt_password
         
         dump_data = agent_in.model_dump()
+        dump_data["tools"] = await self._merge_tools_from_skills(
+            user_id=user_id,
+            tools=dump_data.get("tools") or [],
+            skills=dump_data.get("skills") or [],
+        )
         if dump_data.get("api_key"):
-            dump_data["api_key"] = encrypt_password(dump_data["api_key"])
+            dump_data["api_key"] = encrypt_password(dump_data["api_key"].strip())
         if dump_data.get("embedding_api_key"):
-            dump_data["embedding_api_key"] = encrypt_password(dump_data["embedding_api_key"])
+            dump_data["embedding_api_key"] = encrypt_password(dump_data["embedding_api_key"].strip())
             
         db_agent = Agent(
             id=str(uuid.uuid4()),
@@ -162,13 +170,21 @@ class AgentService:
                     delete_document_task.delay(url, agent.embedding_provider, agent.embedding_model, agent.id)
 
         update_data = agent_in.model_dump(exclude_unset=True)
+        if "skills" in update_data or "tools" in update_data:
+            merged_tools_base = update_data.get("tools", agent.tools or [])
+            merged_skills_base = update_data.get("skills", agent.skills or [])
+            update_data["tools"] = await self._merge_tools_from_skills(
+                user_id=user_id,
+                tools=merged_tools_base or [],
+                skills=merged_skills_base or [],
+            )
         for field, value in update_data.items():
             if field in ["api_key", "embedding_api_key"]:
                 # Nếu là chuỗi đã che (có '****' hoặc toàn dấu sao) thì không cập nhật
                 if value in ["", None, "********", "****"] or "****" in str(value):
                     continue
                 if value:
-                    value = encrypt_password(value)
+                    value = encrypt_password(value.strip())
             setattr(agent, field, value)
             
         updated_agent = await self.repo.update(agent)
@@ -238,6 +254,52 @@ class AgentService:
         # 4. Xóa bản ghi Agent trong SQL DB
         await self.repo.delete(agent_id, user_id)
         return True
+
+    async def _merge_tools_from_skills(self, user_id: str, tools: list, skills: list) -> list:
+        """Auto-add required tools from active skills into agent tools without duplicates."""
+        tool_list = list(tools or [])
+        skill_names = []
+        for skill_item in (skills or []):
+            if isinstance(skill_item, str):
+                skill_names.append(skill_item)
+            elif isinstance(skill_item, dict) and skill_item.get("is_active", True) and skill_item.get("name"):
+                skill_names.append(str(skill_item.get("name")))
+
+        if not skill_names:
+            return tool_list
+
+        result = await self.repo.db.execute(
+            select(Skill.name, Skill.required_tools).where(
+                Skill.name.in_(skill_names),
+                (Skill.user_id == user_id) | (Skill.user_id.is_(None)),
+            )
+        )
+        skill_rows = result.all()
+        required_tools = []
+        for _, req in skill_rows:
+            if isinstance(req, list):
+                required_tools.extend([t for t in req if isinstance(t, str) and t.strip()])
+            elif isinstance(req, str):
+                try:
+                    parsed = json.loads(req)
+                    if isinstance(parsed, list):
+                        required_tools.extend([t for t in parsed if isinstance(t, str) and t.strip()])
+                except Exception:
+                    continue
+
+        existing_tool_names = set()
+        for item in tool_list:
+            if isinstance(item, str):
+                existing_tool_names.add(item)
+            elif isinstance(item, dict) and item.get("name"):
+                existing_tool_names.add(str(item.get("name")))
+
+        for tool_name in required_tools:
+            if tool_name not in existing_tool_names:
+                tool_list.append(tool_name)
+                existing_tool_names.add(tool_name)
+
+        return tool_list
 
     async def _sync_datasource_config(self, agent: Agent):
         """Đồng bộ cấu hình AI của Agent vào Datasource và kích hoạt Indexing"""

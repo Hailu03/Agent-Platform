@@ -11,6 +11,8 @@ interface User {
   email: string;
   avatar_url?: string;
   is_google_connected: boolean;
+  is_google_tool_connected: boolean;
+  is_facebook_connected: boolean;
 }
 
 export function useAuth() {

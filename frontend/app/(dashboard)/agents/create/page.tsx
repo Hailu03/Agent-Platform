@@ -42,6 +42,8 @@ import {
   CheckCircle2,
   AlertCircle,
   RefreshCcw,
+  Activity,
+  MessageSquare,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { ChatInterface } from "@/components/shared/ChatInterface";
@@ -141,8 +143,9 @@ const EMBEDDING_MODELS: Record<string, { value: string, label: string }[]> = {
   ],
 };
 
-const getToolIcon = (name: string, category?: string, size: string = "w-4 h-4") => {
-  const n = name.toLowerCase();
+const getToolIcon = (name?: string, category?: string, size: string = "w-4 h-4") => {
+  const safeName = name || "";
+  const n = safeName.toLowerCase();
   const cn = size;
   if (category === "Gmail" || n.includes("gmail")) {
     const gmailRed = '#EA4335';
@@ -160,6 +163,14 @@ const getToolIcon = (name: string, category?: string, size: string = "w-4 h-4") 
   if (n.includes("interpreter") || n.includes("sql")) return <Cpu className={`${cn} text-indigo-600`} />;
   if (n.includes("dall-e") || n.includes("content")) return <Sparkles className={`${cn} text-amber-600`} />;
   if (n.includes("email")) return <Mail className={`${cn} text-red-600`} />;
+  if (category === "Social Media" || n.includes("facebook")) {
+    const fbBlue = '#1877F2';
+    if (n.includes("đăng") || n.includes("post")) return <Send className={cn} style={{ color: fbBlue }} />;
+    if (n.includes("bình luận") || n.includes("comment")) return <MessageSquare className={cn} style={{ color: fbBlue }} />;
+    if (n.includes("tin nhắn") || n.includes("message")) return <Mail className={cn} style={{ color: fbBlue }} />;
+    if (n.includes("insights") || n.includes("thống kê")) return <Activity className={cn} style={{ color: fbBlue }} />;
+    return <Globe className={cn} style={{ color: fbBlue }} />;
+  }
   return <Network className={`${cn} text-slate-600`} />;
 };
 
@@ -318,7 +329,7 @@ function CreateAgentContent() {
   const searchParams = useSearchParams();
   const agentId = searchParams.get("id");
   const { addNotification } = useNotifications();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [showApiKey, setShowApiKey] = useState(false);
   const [showEmbeddingApiKey, setShowEmbeddingApiKey] = useState(false);
   const [initialKeys, setInitialKeys] = useState({ api_key: "", embedding_api_key: "" });
@@ -422,6 +433,12 @@ function CreateAgentContent() {
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({ "Gmail": true, "Cơ bản": true, "Database": true });
   const [availableConnections, setAvailableConnections] = useState<any[]>([]);
   const [showAddConnection, setShowAddConnection] = useState(false);
+  const [availableToolSearch, setAvailableToolSearch] = useState("");
+  const [facebookPages, setFacebookPages] = useState<{ id: string; name: string; category?: string; tasks?: string[] }[]>([]);
+  const [selectedFacebookPageId, setSelectedFacebookPageId] = useState<string | null>(null);
+  const [selectedFacebookPageName, setSelectedFacebookPageName] = useState<string | null>(null);
+  const [showFacebookPagePicker, setShowFacebookPagePicker] = useState(false);
+  const [isLoadingFacebookPages, setIsLoadingFacebookPages] = useState(false);
   const [isCreatingConnection, setIsCreatingConnection] = useState(false);
   const [newConnectionData, setNewConnectionData] = useState({
     name: "",
@@ -484,6 +501,96 @@ function CreateAgentContent() {
     setIsDirty(true);
   };
 
+  const filteredAvailableToolGroups = Object.entries(
+    availableTools
+      .filter((tool) => {
+        const keyword = availableToolSearch.trim().toLowerCase();
+        if (!keyword) return true;
+
+        return [tool.name, tool.label, tool.description, tool.category]
+          .filter((value): value is string => Boolean(value))
+          .some((value) => value.toLowerCase().includes(keyword));
+      })
+      .reduce((acc, tool) => {
+        const cat = tool.category || "Khác";
+        if (!acc[cat]) acc[cat] = [];
+        acc[cat].push(tool);
+        return acc;
+      }, {} as Record<string, typeof availableTools>)
+  );
+
+  const fetchFacebookPages = async (openPicker: boolean = false) => {
+    setIsLoadingFacebookPages(true);
+    try {
+      const res = await fetchWithAuth("/auth/facebook/pages");
+      if (!res.ok) {
+        if (openPicker) {
+          addNotification("warning", "Chưa kết nối", "Bạn cần kết nối Facebook trước khi chọn Page.");
+        }
+        return;
+      }
+
+      const data = await res.json();
+      setFacebookPages(data.pages || []);
+      setSelectedFacebookPageId(data.selected_page_id || null);
+      setSelectedFacebookPageName(data.selected_page_name || null);
+      if (openPicker) {
+        setShowFacebookPagePicker(true);
+      }
+    } catch (error) {
+      console.error("Failed to fetch Facebook pages", error);
+      addNotification("error", "Lỗi", "Không thể tải danh sách Facebook Pages.");
+    } finally {
+      setIsLoadingFacebookPages(false);
+    }
+  };
+
+  const handleConnectFacebook = async () => {
+    try {
+      const connectUrl = agentId ? `/auth/facebook/connect?agent_id=${agentId}` : "/auth/facebook/connect";
+      const res = await fetchWithAuth(connectUrl);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        addNotification("error", "Lỗi kết nối", data.detail || "Không thể khởi tạo đăng nhập Facebook.");
+        return;
+      }
+
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch (error) {
+      console.error("Facebook connect failed", error);
+      addNotification("error", "Lỗi", "Không thể chuyển tới Facebook Login.");
+    }
+  };
+
+  const handleSelectFacebookPage = async (pageId: string) => {
+    try {
+      const res = await fetchWithAuth("/auth/facebook/select-page", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page_id: pageId }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        addNotification("error", "Lỗi", data.detail || "Không thể lưu Facebook Page.");
+        return;
+      }
+
+      const data = await res.json();
+      setSelectedFacebookPageId(data.selected_page_id);
+      setSelectedFacebookPageName(data.selected_page_name);
+      setShowFacebookPagePicker(false);
+      addNotification("success", "Đã chọn Fanpage", `Page mặc định hiện tại là ${data.selected_page_name}.`);
+      await refreshUser();
+    } catch (error) {
+      console.error("Facebook page select failed", error);
+      addNotification("error", "Lỗi", "Không thể chọn Facebook Page.");
+    }
+  };
+
 
   // Tự động chuyển đổi công cụ "Gmail" cũ sang bộ 7 công cụ mới
   useEffect(() => {
@@ -504,6 +611,26 @@ function CreateAgentContent() {
       }
     }
   }, [availableTools, formData.tools]);
+
+  useEffect(() => {
+    if (user?.is_facebook_connected) {
+      fetchFacebookPages(false);
+    }
+  }, [user?.is_facebook_connected]);
+
+  useEffect(() => {
+    if (searchParams.get("google_tool_connected") === "success") {
+      addNotification("success", "Đã kết nối Google", "Gmail tools đã sẵn sàng cho agent này.");
+      refreshUser();
+    }
+  }, [searchParams, refreshUser]);
+
+  useEffect(() => {
+    if (searchParams.get("facebook_connected") === "success") {
+      addNotification("success", "Đã kết nối Facebook", "Bây giờ bạn có thể chọn Fanpage để Agent quản lý.");
+      refreshUser().then(() => fetchFacebookPages(true));
+    }
+  }, [searchParams, refreshUser]);
 
   const handleCreateSkill = async () => {
     if (!newSkill.name || !newSkill.content) {
@@ -1189,13 +1316,10 @@ function CreateAgentContent() {
                         onValueChange={(val) => {
                           if (val) {
                             const defaultModel = PROVIDER_MODELS[val]?.[0]?.value || "";
-                            const defaultEmbModel = EMBEDDING_MODELS[val]?.[0]?.value || "";
                             setFormData({
                               ...formData,
-                              model_provider: val,
+                              model_provider: val,  
                               model_name: defaultModel,
-                              embedding_provider: val,
-                              embedding_model: defaultEmbModel
                             });
                           }
                         }}
@@ -1789,15 +1913,12 @@ function CreateAgentContent() {
 
                     return Object.entries(groupedTools).map(([category, tools]) => (
                       <div key={category} className="space-y-3">
-                        <button
-                          onClick={() => setExpandedCategories(prev => ({ ...prev, [`main-${category}`]: !prev[`main-${category}`] }))}
-                          className="flex items-center justify-between w-full px-2 group/cat"
-                        >
+                        <div className="flex items-center justify-between w-full px-2 group/cat">
                           <div className="flex items-center gap-2">
                             <h3 className="text-[11px] font-black uppercase tracking-widest text-muted-foreground/60 group-hover/cat:text-blue-500 transition-colors">{category}</h3>
                             <Badge variant="outline" className="text-[8px] h-3.5 px-1.5 opacity-50">{tools.length}</Badge>
 
-                            {category === "Gmail" && !user?.is_google_connected && (
+                            {category === "Gmail" && !user?.is_google_tool_connected && (
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -1820,19 +1941,63 @@ function CreateAgentContent() {
                               </Button>
                             )}
 
-                            {category === "Gmail" && user?.is_google_connected && (
+                            {category === "Gmail" && user?.is_google_tool_connected && (
                               <div className="flex items-center gap-1 ml-2 px-1.5 py-0.5 rounded bg-green-500/10 border border-green-500/20">
                                 <div className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
                                 <span className="text-[8px] font-black text-green-600 uppercase tracking-tighter">ĐÃ KẾT NỐI</span>
                               </div>
                             )}
+
+                            {category === "Facebook Fanpage" && !user?.is_facebook_connected && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-5 px-2 text-[8px] font-black border-blue-500/50 text-blue-600 bg-blue-500/5 hover:bg-blue-500/10 hover:border-blue-500 rounded-md transition-all ml-2"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await handleConnectFacebook();
+                                }}
+                              >
+                                KẾT NỐI META
+                              </Button>
+                            )}
+
+                            {category === "Facebook Fanpage" && user?.is_facebook_connected && (
+                              <>
+                                <div className="flex items-center gap-1 ml-2 px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20">
+                                  <div className="w-1 h-1 rounded-full bg-blue-500 animate-pulse" />
+                                  <span className="text-[8px] font-black text-blue-600 uppercase tracking-tighter">
+                                    {selectedFacebookPageName ? selectedFacebookPageName : "META READY"}
+                                  </span>
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-5 px-2 text-[8px] font-black border-blue-500/30 text-blue-600 bg-blue-500/5 hover:bg-blue-500/10 rounded-md transition-all"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await fetchFacebookPages(true);
+                                  }}
+                                >
+                                  CHỌN PAGE
+                                </Button>
+                              </>
+                            )}
                           </div>
-                          <ChevronRight className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform duration-300", (expandedCategories[`main-${category}`] ?? true) && "rotate-90")} />
-                        </button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setExpandedCategories(prev => ({ ...prev, [`main-${category}`]: !prev[`main-${category}`] }))}
+                            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted/50"
+                          >
+                            <ChevronRight className={cn("w-3.5 h-3.5 transition-transform duration-300", (expandedCategories[`main-${category}`] ?? true) && "rotate-90")} />
+                          </Button>
+                        </div>
 
                         {(expandedCategories[`main-${category}`] ?? true) && (
                           <div className="border rounded-xl bg-white/50 dark:bg-white/[0.02] shadow-sm overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
-                            {tools.map((toolObj) => {
+                            {tools.map((toolObj, toolIndex) => {
                               const toolName = toolObj.name;
                               const toolInfo = toolObj.info || {
                                 name: toolName,
@@ -1841,7 +2006,7 @@ function CreateAgentContent() {
                               };
                               return (
                                 <ToolItem
-                                  key={toolName}
+                                  key={`${category}-${toolName}-${toolIndex}`}
                                   name={toolObj.label || toolInfo.label || toolInfo.name}
                                   desc={toolObj.description || toolInfo.description}
                                   active={toolObj.is_active}
@@ -2046,27 +2211,6 @@ function CreateAgentContent() {
                   })()}
                 </div>
               </section>
-
-
-
-              {/* Section 3: Ecosystem */}
-              <section className="space-y-4">
-                <div className="flex items-center justify-between px-1">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-bold text-foreground/90">Hệ sinh thái Agent</h2>
-                  </div>
-                  <Button variant="ghost" className="rounded-lg h-8 px-3 text-[11px] font-bold text-primary hover:bg-primary/5 transition-all">
-                    <Plus className="w-3.5 h-3.5 mr-1" /> Kết nối Agent
-                  </Button>
-                </div>
-
-                <div className="flex flex-col border rounded-xl bg-white/50 dark:bg-white/[0.02] shadow-sm">
-                  <div className="p-10 text-center space-y-3">
-                    <Network className="w-8 h-8 text-muted-foreground/30 mx-auto" />
-                    <p className="text-xs text-muted-foreground font-medium">Chưa có kết nối hệ sinh thái nào</p>
-                  </div>
-                </div>
-              </section>
             </TabsContent>
 
             {/* --- Tab 4: Automation --- */}
@@ -2116,6 +2260,7 @@ function CreateAgentContent() {
             agentName={formData.name}
             isEmbed={true}
             onClose={() => setShowPreview(false)}
+            showAudit={true}
           />
         </div>
       )}
@@ -2139,81 +2284,101 @@ function CreateAgentContent() {
             </CardHeader>
             <CardContent className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
               <div className="space-y-8">
-                {Object.entries(
-                  availableTools.reduce((acc, tool) => {
-                    const cat = tool.category || "Khác";
-                    if (!acc[cat]) acc[cat] = [];
-                    acc[cat].push(tool);
-                    return acc;
-                  }, {} as Record<string, typeof availableTools>)
-                ).map(([category, tools]) => (
+                <div className="relative">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    value={availableToolSearch}
+                    onChange={(e) => setAvailableToolSearch(e.target.value)}
+                    placeholder="Tìm theo tên tool, ID hoặc mô tả..."
+                    className="h-12 rounded-2xl pl-11 border-muted-foreground/20 bg-white dark:bg-zinc-900/70"
+                  />
+                </div>
+
+                {filteredAvailableToolGroups.length > 0 ? filteredAvailableToolGroups.map(([category, tools]) => (
                   <div key={category} className="space-y-4">
-                    <button
-                      onClick={() => setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }))}
-                      className="flex items-center justify-between w-full px-1 group/cat"
-                    >
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-[11px] font-black uppercase tracking-widest text-muted-foreground/70 group-hover/cat:text-primary transition-colors">{category}</h3>
-                      </div>
-                      <ChevronRight className={cn("w-4 h-4 text-muted-foreground transition-transform duration-300", expandedCategories[category] && "rotate-90")} />
-                    </button>
+                    <div className="flex items-center gap-2 px-1">
+                      <h3 className="text-[11px] font-black uppercase tracking-widest text-muted-foreground/70">{category}</h3>
+                      <Badge variant="outline" className="text-[8px] h-4 px-1.5 opacity-60">{tools.length}</Badge>
+                      {category === "Facebook Fanpage" && !user?.is_facebook_connected && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 px-2 text-[8px] font-black border-blue-500/50 text-blue-600 bg-blue-500/5 hover:bg-blue-500/10 rounded-md"
+                          onClick={handleConnectFacebook}
+                        >
+                          KẾT NỐI META
+                        </Button>
+                      )}
+                      {category === "Facebook Fanpage" && user?.is_facebook_connected && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 px-2 text-[8px] font-black border-blue-500/30 text-blue-600 bg-blue-500/5 hover:bg-blue-500/10 rounded-md"
+                          onClick={() => fetchFacebookPages(true)}
+                        >
+                          {selectedFacebookPageName ? `PAGE: ${selectedFacebookPageName}` : "CHỌN PAGE"}
+                        </Button>
+                      )}
+                    </div>
 
-                    {expandedCategories[category] && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                        {tools.map((tool) => {
-                          const existingTool = formData.tools.find(t => t.name === tool.name);
-                          const isActive = !!existingTool;
-                          return (
-                            <div
-                              key={tool.name}
-                              className={cn(
-                                "p-4 border rounded-2xl transition-all duration-300 flex items-start gap-4 group relative overflow-hidden",
-                                isActive
-                                  ? "bg-primary/[0.03] border-primary/30 shadow-sm"
-                                  : "bg-white dark:bg-zinc-900/50 hover:border-primary/50 hover:shadow-xl hover:-translate-y-0.5 cursor-pointer"
-                              )}
-                              onClick={() => {
-                                if (!isActive) {
-                                  setFormData(prev => ({
-                                    ...prev,
-                                    tools: [...prev.tools, { name: tool.name, is_active: true }]
-                                  }));
-                                  addNotification("success", "Đã thêm công cụ", `Đã thêm ${tool.label || tool.name} thành công.`);
-                                }
-                              }}
-                            >
-                              <div className={cn(
-                                "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border transition-all duration-500 shadow-sm",
-                                isActive ? "bg-white dark:bg-zinc-800 border-primary/20 shadow-primary/10" : "bg-muted/30 group-hover:bg-primary/5 group-hover:border-primary/20 group-hover:scale-110"
-                              )}>
-                                {getToolIcon(tool.name, category, "w-6 h-6")}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-start justify-between gap-2 mb-1">
-                                  <p className="text-sm font-bold leading-tight group-hover:text-primary transition-colors">{tool.label || tool.name}</p>
-                                  {isActive && (
-                                    <Badge className="shrink-0 text-[8px] h-4 bg-primary/10 text-primary border-none font-black px-1.5 uppercase tracking-tighter">ĐÃ THÊM</Badge>
-                                  )}
-                                </div>
-                                <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2 font-medium">
-                                  {tool.description}
-                                </p>
-                              </div>
-
-                              {!isActive && (
-                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
-                                  <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                                    <Plus className="w-3.5 h-3.5" />
-                                  </div>
-                                </div>
-                              )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                      {tools.map((tool) => {
+                        const existingTool = formData.tools.find(t => t.name === tool.name);
+                        const isActive = !!existingTool;
+                        return (
+                          <div
+                            key={tool.name}
+                            className={cn(
+                              "p-4 border rounded-2xl transition-all duration-300 flex items-start gap-4 group relative overflow-hidden",
+                              isActive
+                                ? "bg-primary/[0.03] border-primary/30 shadow-sm"
+                                : "bg-white dark:bg-zinc-900/50 hover:border-primary/50 hover:shadow-xl hover:-translate-y-0.5 cursor-pointer"
+                            )}
+                            onClick={() => {
+                              if (!isActive) {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  tools: [...prev.tools, { name: tool.name, is_active: true }]
+                                }));
+                                addNotification("success", "Đã thêm công cụ", `Đã thêm ${tool.label || tool.name} thành công.`);
+                              }
+                            }}
+                          >
+                            <div className={cn(
+                              "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border transition-all duration-500 shadow-sm",
+                              isActive ? "bg-white dark:bg-zinc-800 border-primary/20 shadow-primary/10" : "bg-muted/30 group-hover:bg-primary/5 group-hover:border-primary/20 group-hover:scale-110"
+                            )}>
+                              {getToolIcon(tool.name, category, "w-6 h-6")}
                             </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-2 mb-1">
+                                <p className="text-sm font-bold leading-tight group-hover:text-primary transition-colors">{tool.label || tool.name}</p>
+                                {isActive && (
+                                  <Badge className="shrink-0 text-[8px] h-4 bg-primary/10 text-primary border-none font-black px-1.5 uppercase tracking-tighter">ĐÃ THÊM</Badge>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2 font-medium">
+                                {tool.description}
+                              </p>
+                            </div>
+
+                            {!isActive && (
+                              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
+                                <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                                  <Plus className="w-3.5 h-3.5" />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                ))}
+                )) : (
+                  <div className="rounded-2xl border border-dashed border-muted-foreground/20 p-10 text-center">
+                    <p className="text-sm font-semibold text-muted-foreground">Không tìm thấy tool nào khớp.</p>
+                  </div>
+                )}
               </div>
             </CardContent>
             <div className="p-4 border-t bg-muted/10 flex justify-end">
@@ -2332,6 +2497,64 @@ function CreateAgentContent() {
         title={confirmConfig.title}
         description={confirmConfig.description}
       />
+
+      <Dialog open={showFacebookPagePicker} onOpenChange={setShowFacebookPagePicker}>
+        <DialogContent className="sm:max-w-[620px] rounded-[1.5rem] p-0 overflow-hidden">
+          <div className="p-6 border-b bg-blue-500/[0.03]">
+            <DialogTitle className="text-xl font-bold">Chọn Fanpage mặc định</DialogTitle>
+            <DialogDescription className="text-xs font-medium mt-1">
+              Agent sẽ ưu tiên dùng Fanpage này cho các Facebook tools nếu bạn không override `page_id`.
+            </DialogDescription>
+          </div>
+
+          <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+            {isLoadingFacebookPages ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">Đang tải danh sách Fanpage...</div>
+            ) : facebookPages.length > 0 ? (
+              facebookPages.map((page) => {
+                const isSelected = selectedFacebookPageId === page.id;
+                return (
+                  <button
+                    key={page.id}
+                    type="button"
+                    onClick={() => handleSelectFacebookPage(page.id)}
+                    className={cn(
+                      "w-full text-left p-4 rounded-2xl border transition-all",
+                      isSelected
+                        ? "border-blue-500/40 bg-blue-500/[0.04] shadow-sm"
+                        : "border-muted-foreground/15 hover:border-blue-500/30 hover:bg-blue-500/[0.02]"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-foreground/90 truncate">{page.name}</p>
+                        <p className="text-[11px] text-muted-foreground mt-1">Page ID: {page.id}</p>
+                        {page.tasks?.length ? (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            Quyền: {page.tasks.join(", ")}
+                          </p>
+                        ) : null}
+                      </div>
+                      {isSelected ? (
+                        <Badge className="bg-blue-500/10 text-blue-600 border-none">Đang dùng</Badge>
+                      ) : (
+                        <Badge variant="outline">Chọn</Badge>
+                      )}
+                    </div>
+                  </button>
+                );
+              })
+            ) : (
+              <div className="py-10 text-center space-y-3">
+                <p className="text-sm font-semibold text-muted-foreground">Tài khoản này chưa có Fanpage nào khả dụng.</p>
+                <Button variant="outline" className="rounded-xl" onClick={handleConnectFacebook}>
+                  Kết nối lại Meta
+                </Button>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Tool Configuration Modal */}
       <Dialog open={showToolConfig} onOpenChange={setShowToolConfig}>
