@@ -133,7 +133,10 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     const token = localStorage.getItem("access_token");
     if (!token || sseConnectedRef.current) return;
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+    let API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
+    if (typeof window !== "undefined" && API_URL.includes("localhost")) {
+      API_URL = API_URL.replace("localhost", "127.0.0.1");
+    }
     const eventSource = new EventSource(`${API_URL}/notifications/stream?token=${token}`);
     sseConnectedRef.current = true;
 

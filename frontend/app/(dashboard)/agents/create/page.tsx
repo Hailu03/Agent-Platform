@@ -40,6 +40,7 @@ import {
   Copy,
   FileCode,
   Activity,
+  GitBranch,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { ChatInterface } from "@/components/shared/ChatInterface";
@@ -325,6 +326,22 @@ function CreateAgentContent() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [showEmbeddingApiKey, setShowEmbeddingApiKey] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
+  const [mode, setMode] = useState<"simple" | "advanced">(agentId ? "advanced" : "simple");
+  const [simpleQuery, setSimpleQuery] = useState("");
+  const [simpleAccess, setSimpleAccess] = useState<string[]>([]);
+  const [simpleAutonomy, setSimpleAutonomy] = useState("semi-auto");
+  const [simpleSchedule, setSimpleSchedule] = useState("event");
+  const [isBuildingWithAI, setIsBuildingWithAI] = useState(false);
+  const [showBlueprintDiff, setShowBlueprintDiff] = useState(false);
+  const [blueprintData, setBlueprintData] = useState<{
+    name: string;
+    description: string;
+    skills: string[];
+    tools: string[];
+    permissions: string[];
+    automation: string;
+    system_instructions: string;
+  } | null>(null);
   const [showPreview, setShowPreview] = useState(true);
   const [isOtherSpecialty, setIsOtherSpecialty] = useState(false);
 
@@ -339,6 +356,7 @@ function CreateAgentContent() {
     tools: [] as { name: string, is_active: boolean, config?: Record<string, unknown> }[],
     skills: [] as { name: string, is_active: boolean }[],
     knowledge_files: [] as { filename: string, url: string, object_name: string, status?: "pending" | "indexing" | "completed" | "error", task_id?: string }[],
+    workflow_id: "",
 
     // Embedding Configuration
     embedding_provider: "google",
@@ -350,6 +368,85 @@ function CreateAgentContent() {
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+
+  const handleBuildWithAI = async () => {
+    if (!simpleQuery.trim()) {
+      addNotification("warning", "Yêu cầu mô tả", "Vui lòng nhập mô tả hoạt động của trợ lý.");
+      return;
+    }
+
+    setIsBuildingWithAI(true);
+    try {
+      const activeTools = formData.tools.filter(t => t.is_active).map(t => t.name);
+      const activeSkills = formData.skills.filter(s => s.is_active).map(s => s.name);
+
+      const res = await fetchWithAuth("/agents/blueprint/compile", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: simpleQuery,
+          current_tools: activeTools,
+          current_skills: activeSkills,
+          current_instructions: formData.instructions,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setBlueprintData(data.blueprint);
+        setShowBlueprintDiff(true);
+        addNotification("success", "Biên dịch Blueprint thành công", "AI đã tự động tối ưu hóa sơ đồ cấu hình trợ lý.");
+      } else {
+        const err = await res.json().catch(() => ({ detail: "Lỗi biên dịch" }));
+        addNotification("error", "Lỗi thiết lập AI", err.detail || "Không thể tự động cấu hình.");
+      }
+    } catch (err) {
+      addNotification("error", "Lỗi kết nối", "Không thể kết nối đến máy chủ.");
+    } finally {
+      setIsBuildingWithAI(false);
+    }
+  };
+
+  const handleApplyBlueprint = () => {
+    if (!blueprintData) return;
+
+    setFormData((prev) => {
+      const newTools = prev.tools.map((t) => ({
+        ...t,
+        is_active: blueprintData.tools.includes(t.name),
+      }));
+      blueprintData.tools.forEach((toolName) => {
+        if (!newTools.some((t) => t.name === toolName)) {
+          newTools.push({ name: toolName, is_active: true });
+        }
+      });
+
+      const newSkills = prev.skills.map((s) => ({
+        ...s,
+        is_active: blueprintData.skills.includes(s.name),
+      }));
+      blueprintData.skills.forEach((skillName) => {
+        if (!newSkills.some((s) => s.name === skillName)) {
+          newSkills.push({ name: skillName, is_active: true });
+        }
+      });
+
+      return {
+        ...prev,
+        name: prev.name.trim() ? prev.name : blueprintData.name,
+        description: prev.description.trim() ? prev.description : blueprintData.description,
+        instructions: blueprintData.system_instructions,
+        tools: newTools,
+        skills: newSkills,
+      };
+    });
+
+    setShowBlueprintDiff(false);
+    setMode("advanced");
+    addNotification("success", "Đã áp dụng Blueprint", "Các cài đặt đã được điền tự động. Bạn đang ở chế độ Cấu hình nâng cao.");
+  };
 
   const [showAddTool, setShowAddTool] = useState(false);
   const [showAddSkill, setShowAddSkill] = useState(false);
@@ -423,6 +520,7 @@ function CreateAgentContent() {
   const [skillTab, setSkillTab] = useState<"edit" | "preview">("edit");
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({ "Gmail": true, "Cơ bản": true, "Database": true });
   const [availableConnections, setAvailableConnections] = useState<{ id: string, name: string, engine: string }[]>([]);
+  const [availableWorkflows, setAvailableWorkflows] = useState<any[]>([]);
   const [showAddConnection, setShowAddConnection] = useState(false);
   const [availableToolSearch, setAvailableToolSearch] = useState("");
   const [facebookPages, setFacebookPages] = useState<{ id: string; name: string; category?: string; tasks?: string[] }[]>([]);
@@ -695,9 +793,10 @@ function CreateAgentContent() {
   useEffect(() => {
     const fetchDependencies = async () => {
       try {
-        const [toolsRes, skillsRes] = await Promise.all([
+        const [toolsRes, skillsRes, workflowsRes] = await Promise.all([
           fetchWithAuth("/agents/tools/available"),
-          fetchWithAuth("/skills/")
+          fetchWithAuth("/skills/"),
+          fetchWithAuth("/workflows/")
         ]);
         if (toolsRes.ok) {
           const tools = await toolsRes.json();
@@ -706,6 +805,10 @@ function CreateAgentContent() {
         if (skillsRes.ok) {
           const skills = await skillsRes.json();
           setAvailableSkills(skills);
+        }
+        if (workflowsRes.ok) {
+          const workflows = await workflowsRes.json();
+          setAvailableWorkflows(workflows);
         }
       } catch (error) {
         console.error("Failed to fetch dependencies:", error);
@@ -760,6 +863,7 @@ function CreateAgentContent() {
               tools: data.tools || [],
               skills: data.skills || [],
               knowledge_files: data.knowledge_files || [],
+              workflow_id: data.workflow_id || "",
               embedding_provider: data.embedding_provider || "google",
               embedding_model: data.embedding_model || "text-embedding-004",
               embedding_api_key: data.embedding_api_key || "",
@@ -1119,9 +1223,37 @@ function CreateAgentContent() {
                 <ArrowLeft className="w-2.5 h-2.5 mr-1 group-hover:-translate-x-0.5 transition-transform" />
                 QUAY LẠI
               </Link>
-              <div>
-                <h1 className="text-2xl font-black tracking-tight text-foreground/90 uppercase">Xây dựng Trợ lý AI</h1>
-                <p className="text-[12px] text-muted-foreground font-medium opacity-70 leading-tight">Thiết kế tư duy và quy trình vận hành của các AI Agent.</p>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                <div>
+                  <h1 className="text-2xl font-black tracking-tight text-foreground/90 uppercase">Xây dựng Trợ lý AI</h1>
+                  <p className="text-[12px] text-muted-foreground font-medium opacity-70 leading-tight">Thiết kế tư duy và quy trình vận hành của các AI Agent.</p>
+                </div>
+                <div className="flex items-center gap-1 p-0.5 bg-muted/60 dark:bg-zinc-900/40 rounded-lg border shadow-sm self-start sm:self-center">
+                  <button
+                    type="button"
+                    onClick={() => setMode("simple")}
+                    className={cn(
+                      "px-3 py-1 rounded-md text-[10px] font-black uppercase tracking-wider transition-all duration-200",
+                      mode === "simple"
+                        ? "bg-primary text-white shadow-sm animate-in fade-in"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Dễ dùng
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("advanced")}
+                    className={cn(
+                      "px-3 py-1 rounded-md text-[10px] font-black uppercase tracking-wider transition-all duration-200",
+                      mode === "advanced"
+                        ? "bg-primary text-white shadow-sm animate-in fade-in"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Nâng cao
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1147,7 +1279,74 @@ function CreateAgentContent() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-[160px_1fr] gap-6 pt-4">
+          {mode === "simple" ? (
+            <div className="space-y-8 pt-10 max-w-3xl mx-auto w-full animate-in fade-in duration-500 flex flex-col items-center justify-center min-h-[50vh]">
+              <div className="text-center space-y-2 mb-4">
+                <div className="w-16 h-16 bg-gradient-to-tr from-primary to-purple-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-primary/20 mx-auto animate-bounce duration-[3s]">
+                  <Sparkles className="w-8 h-8" />
+                </div>
+                <h2 className="text-2xl font-black tracking-tight text-foreground/90 uppercase pt-2">Bạn cần Trợ lý AI giúp việc gì?</h2>
+                <p className="text-xs text-muted-foreground max-w-md mx-auto leading-normal">
+                  Chỉ cần nhập yêu cầu của bạn dưới dạng ngôn ngữ tự nhiên. AI sẽ tự động biên dịch, đề xuất model, gắn skills, mở tools kết nối và lập sơ đồ tự động hóa phù hợp nhất.
+                </p>
+              </div>
+
+              <Card className="w-full rounded-2xl border border-white/20 dark:border-white/5 shadow-[0_20px_60px_rgba(0,0,0,0.06)] bg-white/70 dark:bg-zinc-950/20 backdrop-blur-xl p-6 overflow-hidden">
+                <div className="space-y-4">
+                  <div className="relative">
+                    <Textarea
+                      placeholder="Mô tả chi tiết công việc bạn muốn trợ lý thực hiện... (Ví dụ: Tạo trợ lý giúp tôi tự động đọc Gmail, phân loại email quan trọng, soạn nháp thư trả lời lịch sự và gửi thông báo kiểm duyệt cho tôi trước khi gửi)"
+                      className="rounded-xl min-h-[120px] pb-14 pr-4 border-muted-foreground/20 focus:ring-primary/20 bg-background/50 placeholder:text-muted-foreground/40 transition-all text-sm leading-relaxed"
+                      value={simpleQuery}
+                      onChange={(e) => setSimpleQuery(e.target.value)}
+                    />
+                    <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                      <Button
+                        onClick={handleBuildWithAI}
+                        disabled={isBuildingWithAI || !simpleQuery.trim()}
+                        className="rounded-xl h-10 px-6 text-xs font-bold bg-primary text-white shadow-lg shadow-primary/25 hover:shadow-primary/35 hover:-translate-y-0.5 active:translate-y-0 transition-all uppercase tracking-wider gap-1.5"
+                      >
+                        {isBuildingWithAI ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            Đang phân tích...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+                            Thiết lập bằng AI
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Suggestions list */}
+                  <div className="space-y-2 pt-2">
+                    <p className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest ml-1">Đề xuất gợi ý mẫu</p>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { label: "Trợ lý Gmail", text: "Tự động đọc Gmail, phân loại email tuyển dụng và thư quan trọng, tự động soạn nháp thư trả lời lịch sự và hỏi lại tôi duyệt trước khi gửi." },
+                        { label: "Chăm sóc Fanpage", text: "Trợ lý quản trị Facebook Fanpage, tự động phản hồi tin nhắn của khách hàng và đăng bài cập nhật mới định kỳ." },
+                        { label: "Phân tích SQL", text: "Trợ lý kết nối database SQL, tự động phân tích dữ liệu, tự sinh câu truy vấn SQL và tạo báo cáo doanh thu mỗi sáng lúc 8 giờ." },
+                        { label: "Trợ lý nghiên cứu PDF", text: "Trợ lý hỗ trợ đọc hiểu tài liệu nghiên cứu PDF, tìm kiếm web chuyên sâu để giải đáp câu hỏi và trích dẫn nguồn." },
+                      ].map((item, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setSimpleQuery(item.text)}
+                          className="px-3 py-1.5 rounded-lg border border-muted-foreground/15 bg-background/30 hover:border-primary/30 hover:bg-primary/5 text-[10px] font-extrabold text-foreground/80 hover:text-primary transition-all shadow-sm"
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-[160px_1fr] gap-6 pt-4">
             <div className="hidden lg:block">
               <div className="sticky top-6 space-y-0.5 bg-white/40 dark:bg-zinc-950/20 p-2.5 rounded-2xl border backdrop-blur-xl ring-1 ring-white/10 shadow-sm">
                 <div className="px-3 py-1.5 text-[9px] font-black text-muted-foreground/50 uppercase tracking-widest border-b mb-1">Mục lục</div>
@@ -2149,22 +2348,83 @@ function CreateAgentContent() {
               <div id="sec-automation" className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500 border-t pt-8 scroll-mt-6">
               <section className="space-y-4">
                 <div className="flex items-center gap-2 px-1">
-                  <h2 className="text-xl font-bold">Quy trình tự động</h2>
+                  <h2 className="text-xl font-bold">Liên kết Quy trình tự động (Workflow Binding)</h2>
                 </div>
-                <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl p-16 text-center space-y-6">
-                  <div className="w-16 h-16 bg-primary/10 rounded-[0.5rem] flex items-center justify-center mx-auto">
-                    <Clock className="w-8 h-8 text-primary" />
-                  </div>
-                  <div className="max-w-md mx-auto space-y-2">
-                    <h3 className="text-2xl font-bold">Tự động hóa thông minh</h3>
-                    <p className="text-sm text-muted-foreground">Thiết lập các lịch trình hoặc sự kiện kích hoạt để Agent tự động thực hiện công việc.</p>
-                  </div>
-                  <Button className="rounded-[0.5rem] h-12 px-8 font-bold bg-primary text-white shadow-xl shadow-primary/20">Thiết lập Automation</Button>
+                <Card className="rounded-2xl border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
+                  <CardContent className="p-8 space-y-6">
+                    <div className="flex items-start gap-4">
+                      <div className="w-12 h-12 bg-purple-500/10 rounded-xl flex items-center justify-center text-purple-600 shrink-0 shadow-inner">
+                        <GitBranch className="w-6 h-6" />
+                      </div>
+                      <div className="space-y-1">
+                        <h3 className="text-base font-bold">Chạy tác tử theo Quy trình đồ thị</h3>
+                        <p className="text-xs text-muted-foreground leading-normal max-w-lg">
+                          Gán một quy trình tự động hóa dạng đồ thị (LangGraph) để định cấu hình các bước suy nghĩ, gọi công cụ, kiểm duyệt HITL hoặc chạy mã script Python tùy chỉnh cho tác tử này.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Chọn Quy trình liên kết (Workflow)</label>
+                      <div className="flex gap-3">
+                        <select
+                          value={formData.workflow_id || ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setFormData(prev => ({ ...prev, workflow_id: val || "" }));
+                            setIsDirty(true);
+                          }}
+                          className="flex-1 h-11 rounded-xl border border-muted-foreground/20 bg-background px-3.5 text-xs font-bold shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 cursor-pointer"
+                        >
+                          <option value="">Không sử dụng quy trình (Chạy độc lập mặc định)</option>
+                          {availableWorkflows.map((wf) => (
+                            <option key={wf.id} value={wf.id}>
+                              {wf.name} ({wf.description || "Không có mô tả"})
+                            </option>
+                          ))}
+                        </select>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => router.push("/workflows")}
+                          className="h-11 px-5 rounded-xl text-xs font-bold border-purple-500/20 hover:bg-purple-500/5 text-purple-600 gap-1.5 transition-all shadow-sm cursor-pointer"
+                        >
+                          <Plus className="w-4 h-4" /> Thiết kế mới
+                        </Button>
+                      </div>
+                    </div>
+
+                    {formData.workflow_id && (
+                      <div className="p-4 bg-purple-500/[0.02] border border-purple-500/10 rounded-xl flex items-center justify-between shadow-inner animate-in fade-in slide-in-from-top-1 duration-200">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-white dark:bg-zinc-800 flex items-center justify-center border shadow-sm">
+                            <Zap className="w-4 h-4 text-purple-600 animate-pulse" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-foreground/80">
+                              Đang liên kết: {availableWorkflows.find(w => w.id === formData.workflow_id)?.name || "Quy trình đã chọn"}
+                            </p>
+                            <p className="text-[9px] text-muted-foreground font-semibold">Tác tử sẽ tự động bỏ qua luồng chat thông thường và thực thi LangGraph đồ thị.</p>
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => router.push(`/workflows/${formData.workflow_id}`)}
+                          className="h-8 px-3 rounded-lg text-[10px] font-bold text-purple-600 hover:bg-purple-500/10 transition-all shrink-0 cursor-pointer"
+                        >
+                          Mở thiết kế
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
                 </Card>
               </section>
               </div>
             </div>
           </div>
+        )}
         </div>
       </div>
 
@@ -2197,6 +2457,100 @@ function CreateAgentContent() {
           />
         </div>
       )}
+
+      {/* Build with AI Agent Blueprint Diff Modal */}
+      <Dialog open={showBlueprintDiff} onOpenChange={setShowBlueprintDiff}>
+        <DialogContent className="max-w-2xl rounded-2xl border bg-white/90 dark:bg-zinc-950/80 backdrop-blur-2xl shadow-2xl p-6">
+          <DialogHeader className="border-b pb-4 mb-4">
+            <DialogTitle className="text-lg font-black tracking-tight text-primary flex items-center gap-2">
+              <Sparkles className="w-5 h-5 animate-bounce" />
+              SƠ ĐỒ CẤU HÌNH TRỢ LÝ AI (BLUEPRINT)
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              AI đã tự động lập lịch trình và thiết lập các quyền vận hành tối ưu dựa trên mô tả của bạn.
+            </DialogDescription>
+          </DialogHeader>
+
+          {blueprintData && (
+            <div className="space-y-6 max-h-[450px] overflow-y-auto custom-scrollbar pr-2">
+              {/* Basic Info */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1 p-3 bg-muted/40 rounded-xl border">
+                  <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wider">Tên trợ lý đề xuất</p>
+                  <p className="text-sm font-bold text-foreground/90">{blueprintData.name}</p>
+                </div>
+                <div className="space-y-1 p-3 bg-muted/40 rounded-xl border">
+                  <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wider">Tự động hóa (Trigger)</p>
+                  <p className="text-sm font-bold text-foreground/90">{blueprintData.automation}</p>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div className="space-y-1 p-3 bg-muted/40 rounded-xl border">
+                <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wider">Nhiệm vụ & Chức năng</p>
+                <p className="text-xs text-foreground/80 leading-relaxed font-medium">{blueprintData.description}</p>
+              </div>
+
+              {/* Skills and Tools Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2 p-3 bg-muted/40 rounded-xl border">
+                  <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wider">Kỹ năng được gán (Skills)</p>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {blueprintData.skills.map((s, idx) => (
+                      <Badge key={idx} variant="secondary" className="bg-primary/10 text-primary border-primary/20 text-[10px] rounded-lg py-0.5 px-2 font-bold">{s}</Badge>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2 p-3 bg-muted/40 rounded-xl border">
+                  <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wider">Công cụ kích hoạt (Tools)</p>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {blueprintData.tools.map((t, idx) => (
+                      <Badge key={idx} variant="outline" className="text-[10px] rounded-lg py-0.5 px-2 border-muted-foreground/30 font-semibold">{t}</Badge>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Permissions & Security contract */}
+              <div className="space-y-2.5 p-3 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 uppercase font-black tracking-wider">Cam kết quyền & An toàn (Permissions Contract)</p>
+                <ul className="space-y-1.5 text-xs text-foreground/80 font-medium">
+                  {blueprintData.permissions.map((p, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-amber-500 shrink-0 select-none">✦</span>
+                      <span>{p}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Prompt Preview */}
+              <div className="space-y-2">
+                <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wider ml-1">Bản xem trước System Prompt tự sinh</p>
+                <pre className="p-3 bg-zinc-950 text-zinc-300 rounded-xl text-[10px] font-mono whitespace-pre-wrap leading-relaxed border max-h-[150px] overflow-y-auto custom-scrollbar">
+                  {blueprintData.system_instructions}
+                </pre>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="border-t pt-4 mt-4 flex sm:justify-between items-center gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setShowBlueprintDiff(false)}
+              className="rounded-xl h-10 px-5 text-xs font-bold border-muted-foreground/30 text-muted-foreground uppercase tracking-wider"
+            >
+              Hủy
+            </Button>
+            <Button
+              onClick={handleApplyBlueprint}
+              className="rounded-xl h-10 px-6 text-xs font-bold bg-primary text-white shadow-xl shadow-primary/20 hover:shadow-primary/30 uppercase tracking-wider animate-in fade-in duration-300"
+            >
+              Áp dụng & Thiết lập
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Tool Selection Modal Overlay */}
       {showAddTool && (

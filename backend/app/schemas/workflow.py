@@ -25,3 +25,8 @@ class WorkflowResponse(WorkflowBase):
 
     class Config:
         from_attributes = True
+
+class WorkflowRunRequest(BaseModel):
+    user_query: Optional[str] = "Test query"
+    agent_id: Optional[str] = None
+    inputs: Optional[Dict[str, Any]] = {}

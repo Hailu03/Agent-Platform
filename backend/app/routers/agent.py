@@ -184,6 +184,11 @@ async def get_knowledge_presigned_url(
     """
     Tạo presigned URL để xem/tải tài liệu từ MinIO.
     """
+    if not object_name.startswith(f"{current_user.id}/"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn không có quyền truy cập vào tài liệu này."
+        )
     try:
         content_type, _ = mimetypes.guess_type(object_name)
         # Nếu là download, ép Content-Disposition thành attachment
@@ -196,6 +201,47 @@ async def get_knowledge_presigned_url(
         if not url:
             raise HTTPException(status_code=404, detail="Không thể tạo URL cho tài liệu này")
         return {"url": url}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ Lỗi khi tạo presigned URL: {str(e)}")
         raise HTTPException(status_code=500, detail="Lỗi hệ thống khi truy cập kho lưu trữ")
+
+from app.services.blueprint_service import BlueprintService
+
+from typing import Optional
+
+class CompileBlueprintRequest(BaseModel):
+    query: str
+    access: Optional[List[str]] = None
+    autonomy: Optional[str] = None
+    schedule: Optional[str] = None
+    current_tools: Optional[List[str]] = None
+    current_skills: Optional[List[str]] = None
+    current_instructions: Optional[str] = None
+
+@router.post("/blueprint/compile")
+async def compile_agent_blueprint(
+    req: CompileBlueprintRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Biên dịch mô tả ngôn ngữ tự nhiên thành một cấu hình AI Agent Blueprint.
+    """
+    try:
+        blueprint = BlueprintService.compile_blueprint(
+            query=req.query,
+            access=req.access,
+            autonomy=req.autonomy,
+            schedule=req.schedule,
+            current_tools=req.current_tools,
+            current_skills=req.current_skills,
+            current_instructions=req.current_instructions
+        )
+        return {"success": True, "blueprint": blueprint}
+    except Exception as e:
+        logger.error(f"❌ Lỗi biên dịch blueprint: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Lỗi hệ thống khi biên dịch cấu hình AI: {str(e)}"
+        )

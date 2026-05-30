@@ -21,7 +21,14 @@ import {
   Sparkles,
   MousePointer,
   Link,
-  Move
+  Move,
+  Play,
+  PlayCircle,
+  Activity,
+  Terminal,
+  Clock,
+  Check,
+  AlertTriangle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,6 +72,63 @@ export default function WorkflowDesignerPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const { addNotification } = useNotifications();
+  
+  // Dry run playground states
+  const [showTestPanel, setShowTestPanel] = useState(false);
+  const [testUserQuery, setTestUserQuery] = useState("Test query");
+  const [testAgentId, setTestAgentId] = useState("");
+  const [availableAgents, setAvailableAgents] = useState<any[]>([]);
+  const [testRunning, setTestRunning] = useState(false);
+  const [testResult, setTestResult] = useState<any | null>(null);
+
+  useEffect(() => {
+    if (showTestPanel) {
+      fetchAvailableAgents();
+    }
+  }, [showTestPanel]);
+
+  const fetchAvailableAgents = async () => {
+    try {
+      const res = await fetchWithAuth("/agents");
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableAgents(data);
+        if (data.length > 0 && !testAgentId) {
+          setTestAgentId(data[0].id);
+        }
+      }
+    } catch (e) {
+      console.error("Lỗi tải danh sách Agent:", e);
+    }
+  };
+
+  const handleRunDryRun = async () => {
+    setTestRunning(true);
+    setTestResult(null);
+    try {
+      const res = await fetchWithAuth(`/workflows/${workflowId}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_query: testUserQuery,
+          agent_id: testAgentId || undefined
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTestResult(data);
+        addNotification("success", "Chạy thử hoàn tất", "Đã thu thập telemetry trace thành công!");
+      } else {
+        const err = await res.json();
+        addNotification("error", "Lỗi chạy thử", err.detail || "Không thể khởi chạy quy trình.");
+      }
+    } catch (e) {
+      console.error(e);
+      addNotification("error", "Lỗi kết nối", "Không thể gửi yêu cầu chạy thử quy trình.");
+    } finally {
+      setTestRunning(false);
+    }
+  };
   
   // Dragging and canvas references
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -582,10 +646,22 @@ export default function WorkflowDesignerPage() {
             size="sm" 
             onClick={handleSaveWorkflow}
             disabled={saving}
-            className="rounded-xl h-9.5 gap-2 border-purple-500/20 font-bold hover:bg-purple-500/5 text-purple-600 shadow-sm"
+            className="rounded-xl h-9.5 gap-2 border-purple-500/20 font-bold hover:bg-purple-500/5 text-purple-600 shadow-sm cursor-pointer"
           >
             <Save className="w-4 h-4" />
             Lưu sơ đồ
+          </Button>
+          <Button 
+            variant="default" 
+            size="sm" 
+            onClick={() => {
+              setSelectedNodeId(null);
+              setShowTestPanel(true);
+            }}
+            className="rounded-xl h-9.5 gap-2 bg-purple-600 hover:bg-purple-700 text-white font-bold shadow-sm cursor-pointer"
+          >
+            <Play className="w-4 h-4" />
+            Chạy thử (Test)
           </Button>
         </div>
       </div>
@@ -1163,6 +1239,161 @@ export default function WorkflowDesignerPage() {
                 )}
               </div>
 
+            </motion.div>
+          )}
+          {showTestPanel && (
+            <motion.div
+              initial={{ x: 450, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 450, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              className="w-[450px] border-l bg-card shadow-2xl relative z-10 flex flex-col overflow-hidden shrink-0"
+            >
+              {/* Sidebar Header */}
+              <div className="h-14 border-b px-5 flex items-center justify-between shrink-0 bg-muted/10">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-purple-600 animate-pulse" />
+                  <span className="text-xs font-extrabold uppercase tracking-widest text-foreground/90">
+                    Live Dry-Run & Telemetry Trace
+                  </span>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={() => {
+                    setShowTestPanel(false);
+                    setTestResult(null);
+                  }}
+                  className="rounded-xl border w-8 h-8 hover:bg-secondary shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+
+              {/* Playground Testing Configuration Panel */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-6">
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Mock User Query (Câu hỏi chạy thử)
+                    </label>
+                    <Input 
+                      value={testUserQuery} 
+                      onChange={(e) => setTestUserQuery(e.target.value)}
+                      placeholder="Ví dụ: hello, what tools do you have?"
+                      className="rounded-xl h-10 font-semibold"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Chọn Agent liên kết (Model & API Keys)
+                    </label>
+                    <select
+                      value={testAgentId}
+                      onChange={(e) => setTestAgentId(e.target.value)}
+                      className="w-full h-10 rounded-xl border border-muted-foreground/20 bg-background px-3 text-xs font-bold"
+                    >
+                      {availableAgents.map((ag) => (
+                        <option key={ag.id} value={ag.id}>
+                          {ag.name} ({ag.model_provider} · {ag.model_name})
+                        </option>
+                      ))}
+                      {availableAgents.length === 0 && (
+                        <option value="">Mock default (Gemini 2.5 Flash)</option>
+                      )}
+                    </select>
+                    {availableAgents.length === 0 && (
+                      <p className="text-[9px] text-muted-foreground italic leading-normal">
+                        Lưu ý: Hệ thống sẽ tự động dùng mock model an toàn do chưa có Agent nào được tạo.
+                      </p>
+                    )}
+                  </div>
+
+                  <Button 
+                    variant="default"
+                    onClick={handleRunDryRun}
+                    disabled={testRunning}
+                    className="w-full h-10 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold gap-2 cursor-pointer transition-all"
+                  >
+                    {testRunning ? (
+                      <>
+                        <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                        Đang biên dịch & chạy thử...
+                      </>
+                    ) : (
+                      <>
+                        <PlayCircle className="w-4.5 h-4.5" />
+                        Kích hoạt Dry-Run
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                {/* Telemetry Trace Results */}
+                {testResult && (
+                  <div className="border-t pt-5 space-y-4">
+                    <div className="flex items-center justify-between border-b pb-2">
+                      <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                        <Terminal className="w-3.5 h-3.5 text-purple-500" />
+                        Telemetry execution trace
+                      </h4>
+                      <Badge className={testResult.success ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" : "bg-rose-500/10 text-rose-600 border-rose-500/20"}>
+                        {testResult.success ? "SUCCESS" : "FAILED"} · {testResult.total_latency_ms}ms
+                      </Badge>
+                    </div>
+
+                    <div className="space-y-3.5 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                      {testResult.steps.map((step: any, idx: number) => {
+                        const isError = step.node_type === "error" || step.outputs?.error;
+                        return (
+                          <div 
+                            key={idx} 
+                            className={`border rounded-xl p-3 space-y-2 bg-zinc-50/50 dark:bg-zinc-950/20 transition-all ${
+                              isError ? "border-rose-500/30 bg-rose-500/[0.01]" : "border-muted-foreground/10"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6.5 h-6.5 rounded-lg bg-secondary flex items-center justify-center border shadow-inner">
+                                  {getNodeIcon(step.node_type)}
+                                </div>
+                                <div>
+                                  <h5 className="text-[11px] font-bold text-foreground/90 truncate max-w-[180px]">
+                                    {step.node_name}
+                                  </h5>
+                                  <p className="text-[8.5px] font-mono font-bold text-muted-foreground uppercase tracking-widest">
+                                    {step.node_type} · ID: {step.node_id}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1 text-[9px] font-bold text-muted-foreground bg-secondary/40 px-2 py-0.5 rounded border">
+                                <Clock className="w-3 h-3 text-muted-foreground/75" />
+                                {step.timestamp}ms
+                              </div>
+                            </div>
+
+                            {/* Outputs telemetry */}
+                            <div className="space-y-1">
+                              <span className="text-[8.5px] font-bold uppercase tracking-wider text-muted-foreground/70">
+                                Output Variables:
+                              </span>
+                              <pre className="p-2.5 rounded-lg bg-[#121214] text-[8.5px] font-mono text-zinc-300 leading-normal overflow-x-auto border border-zinc-800">
+                                {JSON.stringify(step.outputs, null, 2)}
+                              </pre>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {testResult.steps.length === 0 && (
+                        <p className="text-center text-xs text-muted-foreground italic">
+                          Quy trình không tạo ra bước chạy nào.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

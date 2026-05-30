@@ -2,7 +2,10 @@
  * Centralized API client with automatic token refresh
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+let API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
+if (typeof window !== "undefined" && API_URL.includes("localhost")) {
+  API_URL = API_URL.replace("localhost", "127.0.0.1");
+}
 
 interface FetchOptions extends RequestInit {
   headers?: Record<string, string>;

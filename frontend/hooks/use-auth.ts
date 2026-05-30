@@ -54,7 +54,11 @@ export function useAuth() {
 
   const logout = async () => {
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/auth/logout`, { 
+      let api_url = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
+      if (typeof window !== "undefined" && api_url.includes("localhost")) {
+        api_url = api_url.replace("localhost", "127.0.0.1");
+      }
+      await fetch(`${api_url}/auth/logout`, { 
         method: "POST" 
       });
     } catch (error) {

@@ -38,9 +38,10 @@ app.include_router(meta.router, prefix="/api/v1")
 app.include_router(workflow.router, prefix="/api/v1")
 
 # CORS configuration
+origins = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

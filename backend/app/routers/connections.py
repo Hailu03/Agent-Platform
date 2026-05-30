@@ -62,7 +62,7 @@ async def list_connections(
     repo: DataSourceRepository = Depends(get_datasource_repo),
     current_user: User = Depends(get_current_user),
 ):
-    items = await repo.list_all()
+    items = await repo.list_all(user_id=current_user.id)
     return [DataSourceRead.model_validate(ds) for ds in items]
 
 @router.post("", response_model=DataSourceRead, status_code=status.HTTP_201_CREATED)
@@ -73,6 +73,7 @@ async def save_connection(
     current_user: User = Depends(get_current_user),
 ):
     ds = DataSource(
+        user_id=current_user.id,
         name=body.name,
         engine=body.engine,
         host=body.host,
@@ -108,7 +109,7 @@ async def update_connection(
     repo: DataSourceRepository = Depends(get_datasource_repo),
     current_user: User = Depends(get_current_user),
 ):
-    ds = await repo.get_by_id(ds_id)
+    ds = await repo.get_by_id(ds_id, user_id=current_user.id)
     if not ds:
         raise HTTPException(status_code=404, detail="Connection not found")
     
@@ -146,7 +147,7 @@ async def delete_connection(
     repo: DataSourceRepository = Depends(get_datasource_repo),
     current_user: User = Depends(get_current_user),
 ):
-    ds = await repo.get_by_id(ds_id)
+    ds = await repo.get_by_id(ds_id, user_id=current_user.id)
     if not ds:
         raise HTTPException(status_code=404, detail="Connection not found")
     
@@ -159,7 +160,7 @@ async def delete_connection(
         logger.error(f"⚠️ Không thể kích hoạt dọn dẹp GraphRAG: {e}")
 
     # 2. Xóa trong SQL DB (bao gồm cả semantic metadata)
-    await repo.delete(ds_id)
+    await repo.delete(ds_id, user_id=current_user.id)
 
 @router.post("/{ds_id}/introspect")
 async def introspect_schema(
@@ -167,7 +168,7 @@ async def introspect_schema(
     repo: DataSourceRepository = Depends(get_datasource_repo),
     current_user: User = Depends(get_current_user),
 ):
-    ds = await repo.get_by_id(ds_id)
+    ds = await repo.get_by_id(ds_id, user_id=current_user.id)
     if not ds:
         raise HTTPException(status_code=404, detail="Connection not found")
     
@@ -189,7 +190,7 @@ async def test_existing_connection(
     repo: DataSourceRepository = Depends(get_datasource_repo),
     current_user: User = Depends(get_current_user),
 ):
-    ds = await repo.get_by_id(ds_id)
+    ds = await repo.get_by_id(ds_id, user_id=current_user.id)
     if not ds:
         raise HTTPException(status_code=404, detail="Connection not found")
     
