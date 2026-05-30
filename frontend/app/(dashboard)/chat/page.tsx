@@ -237,12 +237,15 @@ export default function ChatPage() {
                   }
                 }}
                 className={cn(
-                  "w-full text-left p-3 rounded-2xl transition-all duration-200 group relative border cursor-pointer select-none",
+                  "w-full text-left p-3 rounded-2xl transition-all duration-300 group relative border cursor-pointer select-none overflow-hidden",
                   activeThreadId === thread.thread_id 
-                    ? "bg-white dark:bg-zinc-900 border-border shadow-sm ring-1 ring-primary/5" 
-                    : "bg-transparent border-transparent hover:bg-white/60 dark:hover:bg-zinc-900/60"
+                    ? "bg-white dark:bg-zinc-900/80 border-primary/20 shadow-md shadow-primary/5 ring-1 ring-primary/10" 
+                    : "bg-transparent border-transparent hover:bg-white/60 dark:hover:bg-zinc-900/40"
                 )}
               >
+                {activeThreadId === thread.thread_id && (
+                  <div className="absolute left-0 top-0 bottom-0 w-[4px] bg-gradient-to-b from-primary to-emerald-600 rounded-r animate-in fade-in slide-in-from-left duration-300" />
+                )}
                 <div className="flex items-start gap-3">
                   <div className={cn(
                     "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border transition-all",
@@ -381,12 +384,12 @@ export default function ChatPage() {
             </div>
 
             <Button 
-              variant="outline" 
+              variant="default" 
               size="sm"
-              className="rounded-xl h-9 px-4 font-bold text-xs gap-2 bg-zinc-900 dark:bg-zinc-100 text-zinc-100 dark:text-zinc-900 hover:scale-105 active:scale-95 transition-all shadow-md border-none" 
+              className="rounded-xl h-9 px-4 font-black text-xs gap-2 bg-gradient-to-r from-primary to-emerald-600 dark:from-primary dark:to-emerald-500 hover:shadow-lg hover:shadow-primary/20 text-white hover:scale-105 active:scale-95 transition-all border-none" 
               onClick={() => setActiveThreadId(null)}
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3.5 h-3.5 stroke-[3]" />
               Phiên mới
             </Button>
           </div>

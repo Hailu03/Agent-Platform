@@ -8,10 +8,10 @@ import {
   Database, 
   GitBranch, 
   Plug2, 
+  DatabaseZap,
   Wrench,
   Hammer,
   ShieldCheck,
-  BarChart3,
   ChevronDown, 
   ChevronRight, 
   FileText,
@@ -69,9 +69,9 @@ export function Sidebar() {
     { name: "Workflows", href: "/workflows", icon: GitBranch },
     { name: "Skills", href: "/skills", icon: Wrench },
     { name: "Tools", href: "/tools", icon: Hammer },
-    { name: "Fanpage", href: "/fanpage", icon: BarChart3 },
     { name: "Guardrails", href: "/guardrails", icon: ShieldCheck },
-    { name: "Connectors", href: "/connectors", icon: Plug2 },
+    { name: "Connection", href: "/connection", icon: Plug2 },
+    { name: "Data Sources", href: "/data-sources", icon: DatabaseZap },
   ];
 
   return (
@@ -122,8 +122,8 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className={cn(
-        "flex-1 space-y-2 overflow-y-auto custom-scrollbar pt-2",
-        isCollapsed ? "px-2" : "px-4"
+        "flex-1 space-y-0.5 overflow-y-auto custom-scrollbar pt-2",
+        isCollapsed ? "px-2" : "px-3"
       )}>
         {menuItems.map((item) => {
           const isActive = pathname === item.href;
@@ -135,18 +135,34 @@ export function Sidebar() {
               <Link
                 href={item.href}
                 className={cn(
-                  "flex items-center rounded-xl transition-all duration-300 group overflow-hidden",
+                  "flex items-center rounded-xl transition-all duration-200 group overflow-hidden relative z-10",
                   isActive 
-                    ? "bg-primary text-white shadow-md shadow-primary/20" 
-                    : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
-                  isCollapsed ? "justify-center p-2.5" : "gap-3 px-3 py-2.5"
+                    ? "text-primary font-black" 
+                    : "text-muted-foreground hover:text-foreground",
+                  isCollapsed ? "justify-center p-2" : "gap-3 px-3 py-2"
                 )}
                 title={isCollapsed ? item.name : ""}
               >
+                {isActive && (
+                  <motion.div
+                    layoutId="active-sidebar-bg"
+                    className="absolute inset-0 bg-primary/10 dark:bg-primary/15 rounded-xl -z-10 border border-primary/10"
+                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                  />
+                )}
+                
+                {isActive && !isCollapsed && (
+                  <motion.div 
+                    layoutId="active-sidebar-line" 
+                    className="absolute left-0 top-[25%] bottom-[25%] w-[3px] bg-primary rounded-r-full"
+                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                  />
+                )}
+
                 <div className="flex items-center justify-center shrink-0">
                   <item.icon className={cn(
-                    "w-5 h-5 transition-transform duration-300 group-hover:scale-110",
-                    isActive ? "text-white" : "group-hover:text-primary"
+                    "w-5 h-5 transition-transform duration-200 group-hover:scale-105",
+                    isActive ? "text-primary" : "group-hover:text-primary/80"
                   )} />
                 </div>
 
@@ -169,7 +185,7 @@ export function Sidebar() {
                       e.preventDefault();
                       toggleExpand(item.name);
                     }}
-                    className="p-1 hover:bg-white/10 rounded-md shrink-0"
+                    className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-md shrink-0"
                   >
                     {isItemExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                   </button>

@@ -35,6 +35,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { useNotifications } from "@/hooks/use-notifications";
 import { cn } from "@/lib/utils";
+import {
+  AnimatedSection,
+  SpotlightCard,
+  MagneticButton,
+  RevealText,
+  MetricCounter,
+  TiltCard,
+} from "@/components/ui/Animated";
 
 const navItems = [
   { label: "Product", href: "#product" },
@@ -48,13 +56,6 @@ const metrics = [
   { value: "5 min", label: "để tạo agent đầu tiên" },
   { value: "24/7", label: "tự động hóa tác vụ lặp lại" },
   { value: "20+", label: "connector và công cụ sẵn sàng" },
-];
-
-const headlineLines = [
-  ["Build", "Custom"],
-  ["AI", "Agents"],
-  ["With", "Natural"],
-  ["Language"],
 ];
 
 const connectorMarquee = [
@@ -76,11 +77,6 @@ const agentSignals = [
 ];
 
 const revealViewport = { once: true, margin: "-90px" };
-
-const sectionReveal = {
-  hidden: { opacity: 0, y: 64, filter: "blur(14px)" },
-  visible: { opacity: 1, y: 0, filter: "blur(0px)" },
-};
 
 const staggerContainer = {
   hidden: {},
@@ -228,6 +224,14 @@ function LandingPageContent() {
   return (
     <div className="min-h-screen overflow-hidden bg-[#050807] text-white">
       <div className="pointer-events-none fixed inset-0 z-0">
+        {/* Subtle noise grain texture overlay */}
+        <div className="absolute inset-0 noise-overlay" />
+        
+        {/* Floating gradient mesh glows */}
+        <div className="absolute left-[-15vw] top-[-10vh] size-[60vw] rounded-full bg-emerald-500/10 blur-[130px] animate-orb-1" />
+        <div className="absolute right-[-10vw] top-[25vh] size-[50vw] rounded-full bg-teal-500/8 blur-[120px] animate-orb-2" />
+        <div className="absolute left-[15vw] bottom-[-15vh] size-[55vw] rounded-full bg-lime-500/6 blur-[140px] animate-orb-3" />
+
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_-20%,rgba(16,185,129,0.24),transparent_32%),linear-gradient(135deg,rgba(20,184,166,0.12),transparent_28%),linear-gradient(225deg,rgba(132,204,22,0.1),transparent_26%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.055)_1px,transparent_1px)] bg-[size:72px_72px] opacity-20" />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent,rgba(5,8,7,0.72)_55%,#050807)]" />
@@ -258,8 +262,15 @@ function SiteNav({
   mobileOpen: boolean;
   setMobileOpen: (open: boolean) => void;
 }) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
   return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/10 bg-[#050807]/72 backdrop-blur-2xl">
+    <motion.header
+      initial={{ y: -64, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+      className="fixed inset-x-0 top-0 z-50 border-b border-white/10 bg-[#050807]/72 backdrop-blur-2xl"
+    >
       <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link href="/" className="flex items-center gap-3" aria-label="WAO AI Agent Platform">
           <span className="grid size-9 place-items-center rounded-lg border border-emerald-300/30 bg-emerald-400/15 text-sm font-black text-emerald-200 shadow-[0_0_28px_rgba(16,185,129,0.28)]">
@@ -268,14 +279,25 @@ function SiteNav({
           <span className="text-sm font-semibold tracking-wide text-white sm:text-base">WAO AI Agent Platform</span>
         </Link>
 
-        <div className="hidden items-center gap-1 md:flex">
-          {navItems.map((item) => (
+        <div
+          className="hidden items-center gap-1 md:flex"
+          onMouseLeave={() => setHoveredIdx(null)}
+        >
+          {navItems.map((item, idx) => (
             <Link
               key={item.href}
               href={item.href}
-              className="rounded-lg px-3 py-2 text-sm font-medium text-white/64 transition hover:bg-white/8 hover:text-white"
+              onMouseEnter={() => setHoveredIdx(idx)}
+              className="relative rounded-lg px-3 py-2 text-sm font-medium text-white/64 transition hover:text-white"
             >
-              {item.label}
+              {hoveredIdx === idx && (
+                <motion.span
+                  layoutId="nav-hover-bg"
+                  className="absolute inset-0 rounded-lg bg-white/8"
+                  transition={{ type: "spring", stiffness: 350, damping: 30 }}
+                />
+              )}
+              <span className="relative z-10">{item.label}</span>
             </Link>
           ))}
         </div>
@@ -333,7 +355,7 @@ function SiteNav({
           </div>
         </div>
       )}
-    </header>
+    </motion.header>
   );
 }
 
@@ -382,59 +404,50 @@ function HeroSection() {
             AI agent builder for modern Vietnamese teams
           </motion.div>
 
-          <h1 className="max-w-4xl text-5xl font-semibold leading-[1.02] text-white sm:text-6xl lg:text-7xl">
-            {headlineLines.map((line, lineIndex) => (
-              <span key={line.join("-")} className="block">
-                {line.map((word, wordIndex) => {
-                  const index = lineIndex * 2 + wordIndex;
-
-                  return (
-                    <motion.span
-                      key={word}
-                      className={cn(
-                        "mr-[0.22em] inline-block",
-                        word === "AI" || word === "Natural"
-                          ? "bg-gradient-to-r from-emerald-200 via-white to-lime-200 bg-clip-text text-transparent"
-                          : ""
-                      )}
-                      initial={{ opacity: 0, y: 34, filter: "blur(10px)" }}
-                      animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                      transition={{ delay: 0.12 + index * 0.07, duration: 0.56, ease: [0.22, 1, 0.36, 1] }}
-                    >
-                      {word}
-                    </motion.span>
-                  );
-                })}
-              </span>
-            ))}
+          <h1 className="max-w-4xl text-5xl font-semibold leading-[1.12] text-white sm:text-6xl lg:text-7.5xl tracking-tight">
+            <RevealText
+              text="Build Custom AI Agents With Natural Language"
+              highlightWords={["AI", "Natural"]}
+              highlightClassName="bg-gradient-to-r from-emerald-200 via-white to-lime-200 bg-clip-text text-transparent font-black"
+              delay={0.15}
+            />
           </h1>
 
-          <p className="mt-6 max-w-2xl text-base leading-8 text-white/66 sm:text-lg">
+          <motion.p
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.48, duration: 0.65 }}
+            className="mt-6 max-w-2xl text-base leading-8 text-white/66 sm:text-lg"
+          >
             WAO giúp bạn mô tả agent bằng ngôn ngữ tự nhiên, kết nối công cụ và triển khai workflow AI
             cho sales, support, research, vận hành và phân tích dữ liệu mà không cần code.
-          </p>
+          </motion.p>
 
           <motion.div
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.72, duration: 0.55 }}
-            className="mt-8 flex flex-col gap-3 sm:flex-row"
+            transition={{ delay: 0.6, duration: 0.55 }}
+            className="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center"
           >
-            <Link href="/register">
-              <Button className="h-12 w-full rounded-lg bg-emerald-400 px-6 text-base font-semibold text-[#04120d] shadow-[0_18px_60px_rgba(16,185,129,0.28)] hover:bg-emerald-300 sm:w-auto">
-                Start Building
-                <ArrowRight className="size-4" />
-              </Button>
-            </Link>
-            <Link href="#product">
-              <Button
-                variant="outline"
-                className="h-12 w-full rounded-lg border-white/14 bg-white/6 px-6 text-base font-semibold text-white hover:bg-white/10 sm:w-auto"
-              >
-                <Play className="size-4 fill-white/80" />
-                View Demo
-              </Button>
-            </Link>
+            <MagneticButton>
+              <Link href="/register" className="block">
+                <Button className="h-12 w-full rounded-lg bg-emerald-400 px-6 text-base font-semibold text-[#04120d] shadow-[0_18px_60px_rgba(16,185,129,0.28)] hover:bg-emerald-300 sm:w-auto">
+                  Start Building
+                  <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
+                </Button>
+              </Link>
+            </MagneticButton>
+            <MagneticButton>
+              <Link href="#product" className="block">
+                <Button
+                  variant="outline"
+                  className="h-12 w-full rounded-lg border-white/14 bg-white/6 px-6 text-base font-semibold text-white hover:bg-white/10 sm:w-auto"
+                >
+                  <Play className="size-4 fill-white/80" />
+                  View Demo
+                </Button>
+              </Link>
+            </MagneticButton>
           </motion.div>
 
           <div className="mt-10 grid max-w-2xl grid-cols-3 gap-3">
@@ -444,9 +457,11 @@ function HeroSection() {
                 className="border-l border-emerald-300/20 pl-4"
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.84 + index * 0.1, duration: 0.45 }}
+                transition={{ delay: 0.72 + index * 0.1, duration: 0.45 }}
               >
-                <div className="text-xl font-semibold text-white sm:text-2xl">{metric.value}</div>
+                <div className="text-xl font-semibold text-white sm:text-2xl">
+                  <MetricCounter value={metric.value} delay={0.8 + index * 0.12} />
+                </div>
                 <div className="mt-1 text-xs leading-5 text-white/48">{metric.label}</div>
               </motion.div>
             ))}
@@ -456,10 +471,12 @@ function HeroSection() {
         <motion.div
           initial={{ opacity: 0, scale: 0.96, y: 24 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          transition={{ delay: 0.26, duration: 0.82, ease: "easeOut" }}
+          transition={{ delay: 0.35, duration: 0.82, ease: "easeOut" }}
           className="relative min-w-0"
         >
-          <AgentAnimationStage />
+          <TiltCard maxRotate={6}>
+            <AgentAnimationStage />
+          </TiltCard>
         </motion.div>
       </div>
     </section>
@@ -624,14 +641,11 @@ function AgentAnimationStage() {
 
 function ProductSection() {
   return (
-    <motion.section
+    <AnimatedSection
       id="product"
+      direction="up"
+      bounce="bouncy"
       className="px-4 py-20 sm:px-6 lg:px-8"
-      variants={sectionReveal}
-      initial="hidden"
-      whileInView="visible"
-      viewport={revealViewport}
-      transition={{ duration: 0.72, ease: [0.22, 1, 0.36, 1] }}
     >
       <div className="mx-auto max-w-7xl">
         <SectionIntro
@@ -641,12 +655,7 @@ function ProductSection() {
         />
 
         <motion.div className="mt-12 grid gap-4 lg:grid-cols-3" variants={staggerContainer} initial="hidden" whileInView="visible" viewport={revealViewport}>
-          <motion.div
-            variants={cardReveal}
-            whileHover={{ y: -8, scale: 1.01 }}
-            transition={{ duration: 0.28 }}
-            className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.045] p-6 lg:col-span-2"
-          >
+          <SpotlightCard className="lg:col-span-2">
             <div className="pointer-events-none absolute inset-x-[-20%] top-0 h-px bg-gradient-to-r from-transparent via-emerald-200/80 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100 [animation:landing-shimmer_2.8s_linear_infinite]" />
             <div className="mb-6 flex items-center justify-between">
               <div className="text-sm font-semibold text-white/86">Agent command center</div>
@@ -660,14 +669,16 @@ function ProductSection() {
               ].map(([label, value, delta], index) => (
                 <motion.div
                   key={label}
-                  className="rounded-lg border border-white/10 bg-black/18 p-4"
+                  className="rounded-lg border border-white/10 bg-black/18 p-4 z-10"
                   initial={{ opacity: 0, y: 16 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={revealViewport}
                   transition={{ delay: index * 0.08, duration: 0.42 }}
                 >
                   <div className="text-xs text-white/44">{label}</div>
-                  <div className="mt-3 text-2xl font-semibold text-white">{value}</div>
+                  <div className="mt-3 text-2xl font-semibold text-white">
+                    <MetricCounter value={value} delay={index * 0.1} />
+                  </div>
                   <div className="mt-2 text-xs font-semibold text-emerald-200">{delta} this month</div>
                 </motion.div>
               ))}
@@ -682,14 +693,9 @@ function ProductSection() {
                 tạo brief ngắn cho sales trước 8h mỗi sáng.&rdquo;
               </p>
             </div>
-          </motion.div>
+          </SpotlightCard>
 
-          <motion.div
-            variants={cardReveal}
-            whileHover={{ y: -8, rotateX: 2, rotateY: -2 }}
-            transition={{ duration: 0.28 }}
-            className="relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.045] p-6"
-          >
+          <SpotlightCard>
             <motion.div
               aria-hidden
               className="absolute -right-12 -top-12 size-28 rounded-full bg-emerald-300/12 blur-2xl"
@@ -701,7 +707,7 @@ function ProductSection() {
               {["Permission scope", "Action approval", "Audit timeline", "Model routing"].map((item, index) => (
                 <motion.div
                   key={item}
-                  className="flex items-center gap-3"
+                  className="flex items-center gap-3 z-10"
                   initial={{ opacity: 0, x: 18 }}
                   whileInView={{ opacity: 1, x: 0 }}
                   viewport={revealViewport}
@@ -714,23 +720,20 @@ function ProductSection() {
                 </motion.div>
               ))}
             </div>
-          </motion.div>
+          </SpotlightCard>
         </motion.div>
       </div>
-    </motion.section>
+    </AnimatedSection>
   );
 }
 
 function UseCasesSection() {
   return (
-    <motion.section
+    <AnimatedSection
       id="use-cases"
+      direction="left"
+      bounce="bouncy"
       className="border-y border-white/10 bg-white/[0.025] px-4 py-20 sm:px-6 lg:px-8"
-      variants={sectionReveal}
-      initial="hidden"
-      whileInView="visible"
-      viewport={revealViewport}
-      transition={{ duration: 0.72, ease: [0.22, 1, 0.36, 1] }}
     >
       <div className="mx-auto max-w-7xl">
         <SectionIntro
@@ -744,20 +747,17 @@ function UseCasesSection() {
           ))}
         </motion.div>
       </div>
-    </motion.section>
+    </AnimatedSection>
   );
 }
 
 function WorkflowSection() {
   return (
-    <motion.section
+    <AnimatedSection
       id="workflow"
+      direction="right"
+      bounce="bouncy"
       className="px-4 py-20 sm:px-6 lg:px-8"
-      variants={sectionReveal}
-      initial="hidden"
-      whileInView="visible"
-      viewport={revealViewport}
-      transition={{ duration: 0.72, ease: [0.22, 1, 0.36, 1] }}
     >
       <div className="mx-auto max-w-7xl">
         <SectionIntro
@@ -767,12 +767,9 @@ function WorkflowSection() {
         />
         <motion.div className="mt-12 grid gap-4 lg:grid-cols-4" variants={staggerContainer} initial="hidden" whileInView="visible" viewport={revealViewport}>
           {workflowSteps.map((step, index) => (
-            <motion.div
+            <SpotlightCard
               key={step.title}
-              variants={cardReveal}
-              whileHover={{ y: -10, scale: 1.015 }}
-              transition={{ duration: 0.28 }}
-              className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.045] p-6"
+              className="group"
             >
               <motion.div
                 aria-hidden
@@ -788,24 +785,21 @@ function WorkflowSection() {
               </div>
               <h3 className="text-lg font-semibold text-white">{step.title}</h3>
               <p className="mt-3 text-sm leading-6 text-white/54">{step.desc}</p>
-            </motion.div>
+            </SpotlightCard>
           ))}
         </motion.div>
       </div>
-    </motion.section>
+    </AnimatedSection>
   );
 }
 
 function FeaturesSection() {
   return (
-    <motion.section
+    <AnimatedSection
       id="features"
+      direction="left"
+      bounce="bouncy"
       className="border-y border-white/10 bg-[#07100d] px-4 py-20 sm:px-6 lg:px-8"
-      variants={sectionReveal}
-      initial="hidden"
-      whileInView="visible"
-      viewport={revealViewport}
-      transition={{ duration: 0.72, ease: [0.22, 1, 0.36, 1] }}
     >
       <div className="mx-auto max-w-7xl">
         <SectionIntro
@@ -819,20 +813,17 @@ function FeaturesSection() {
           ))}
         </motion.div>
       </div>
-    </motion.section>
+    </AnimatedSection>
   );
 }
 
 function PricingSection() {
   return (
-    <motion.section
+    <AnimatedSection
       id="pricing"
+      direction="up"
+      bounce="bouncy"
       className="px-4 py-20 sm:px-6 lg:px-8"
-      variants={sectionReveal}
-      initial="hidden"
-      whileInView="visible"
-      viewport={revealViewport}
-      transition={{ duration: 0.72, ease: [0.22, 1, 0.36, 1] }}
     >
       <div className="mx-auto max-w-7xl">
         <SectionIntro
@@ -846,18 +837,16 @@ function PricingSection() {
           ))}
         </motion.div>
       </div>
-    </motion.section>
+    </AnimatedSection>
   );
 }
 
 function FinalCta() {
   return (
-    <motion.section
+    <AnimatedSection
+      direction="scale"
+      bounce="gentle"
       className="px-4 pb-20 pt-8 sm:px-6 lg:px-8"
-      initial={{ opacity: 0, y: 48, scale: 0.97 }}
-      whileInView={{ opacity: 1, y: 0, scale: 1 }}
-      viewport={revealViewport}
-      transition={{ duration: 0.72, ease: [0.22, 1, 0.36, 1] }}
     >
       <div className="relative mx-auto max-w-7xl overflow-hidden rounded-xl border border-emerald-300/18 bg-[linear-gradient(135deg,rgba(16,185,129,0.22),rgba(20,184,166,0.09),rgba(255,255,255,0.045))] p-8 sm:p-10 lg:p-12">
         <div className="pointer-events-none absolute inset-x-[-30%] top-0 h-px bg-gradient-to-r from-transparent via-white/90 to-transparent [animation:landing-shimmer_3.2s_linear_infinite]" />
@@ -877,15 +866,17 @@ function FinalCta() {
               Mô tả workflow, kết nối nguồn dữ liệu và để WAO biến tri thức của doanh nghiệp thành agent có thể hành động.
             </p>
           </div>
-          <Link href="/register">
-            <Button className="h-12 w-full rounded-lg bg-white px-6 font-semibold text-[#04120d] hover:bg-emerald-50 lg:w-auto">
-              Start Building
-              <ArrowRight className="size-4" />
-            </Button>
-          </Link>
+          <MagneticButton>
+            <Link href="/register" className="block">
+              <Button className="h-12 w-full rounded-lg bg-white px-6 font-semibold text-[#04120d] hover:bg-emerald-50 lg:w-auto shadow-lg">
+                Start Building
+                <ArrowRight className="size-4" />
+              </Button>
+            </Link>
+          </MagneticButton>
         </div>
       </div>
-    </motion.section>
+    </AnimatedSection>
   );
 }
 
@@ -930,17 +921,7 @@ function SectionIntro({ eyebrow, title, desc }: { eyebrow: string; title: string
 
 function InfoCard({ icon: Icon, title, desc }: { icon: LucideIcon; title: string; desc: string }) {
   return (
-    <motion.div
-      variants={cardReveal}
-      whileHover={{ y: -10, scale: 1.018, rotateX: 2, rotateY: -2 }}
-      transition={{ duration: 0.24 }}
-      className="group relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.045] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-    >
-      <div className="pointer-events-none absolute inset-x-[-30%] top-0 h-px bg-gradient-to-r from-transparent via-emerald-200/80 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100 [animation:landing-shimmer_2.4s_linear_infinite]" />
-      <motion.div
-        aria-hidden
-        className="absolute -right-16 -top-16 size-32 rounded-full bg-emerald-300/10 blur-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-      />
+    <SpotlightCard className="transition-all duration-300 flex flex-col h-full hover:scale-[1.015]">
       <motion.div
         className="mb-6 grid size-11 place-items-center rounded-lg bg-emerald-300/10 text-emerald-200"
         animate={{ y: [0, -4, 0] }}
@@ -950,7 +931,7 @@ function InfoCard({ icon: Icon, title, desc }: { icon: LucideIcon; title: string
       </motion.div>
       <h3 className="text-lg font-semibold text-white">{title}</h3>
       <p className="mt-3 text-sm leading-6 text-white/54">{desc}</p>
-    </motion.div>
+    </SpotlightCard>
   );
 }
 
@@ -968,32 +949,28 @@ function PricingCard({
   highlighted?: boolean;
 }) {
   return (
-    <motion.div
-      variants={cardReveal}
-      whileHover={{ y: -12, scale: highlighted ? 1.025 : 1.018 }}
-      transition={{ duration: 0.26 }}
+    <SpotlightCard
       className={cn(
-        "group relative flex overflow-hidden rounded-xl border p-6",
+        "flex w-full flex-col hover:scale-[1.015] z-10 transition-all duration-300",
         highlighted
           ? "border-emerald-300/34 bg-emerald-300/[0.095] shadow-[0_24px_80px_rgba(16,185,129,0.16)]"
           : "border-white/10 bg-white/[0.045]"
       )}
     >
-      <div className="pointer-events-none absolute inset-x-[-35%] top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100 [animation:landing-shimmer_2.6s_linear_infinite]" />
       {highlighted && (
         <motion.div
           aria-hidden
-          className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(16,185,129,0.22),transparent_42%)]"
+          className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(16,185,129,0.22),transparent_42%)] pointer-events-none"
           animate={{ opacity: [0.45, 0.8, 0.45] }}
           transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut" }}
         />
       )}
       {highlighted && (
-        <div className="absolute right-5 top-5 rounded-full bg-emerald-300 px-3 py-1 text-xs font-bold text-[#04120d]">
+        <div className="absolute right-5 top-5 rounded-full bg-emerald-300 px-3 py-1 text-xs font-bold text-[#04120d] z-20">
           Popular
         </div>
       )}
-      <div className="flex w-full flex-col">
+      <div className="flex w-full flex-col relative z-10">
         <h3 className="text-xl font-semibold text-white">{name}</h3>
         <p className="mt-3 min-h-12 text-sm leading-6 text-white/54">{desc}</p>
         <div className="mt-8 flex items-end gap-1">
@@ -1009,7 +986,7 @@ function PricingCard({
             </div>
           ))}
         </div>
-        <Link href="/register" className="mt-8 block">
+        <Link href="/register" className="mt-8 block w-full">
           <Button
             className={cn(
               "h-11 w-full rounded-lg font-semibold",
@@ -1023,6 +1000,6 @@ function PricingCard({
           </Button>
         </Link>
       </div>
-    </motion.div>
+    </SpotlightCard>
   );
 }

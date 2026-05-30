@@ -135,8 +135,34 @@ class FacebookBaseTool(BaseTool):
                     error=error,
                     data={
                         "next_steps": [
-                            "Chuyển quyền hội thoại về app hiện tại trong cấu hình Handover Protocol của Meta.",
-                            "Hoặc gửi từ app đang là Primary Receiver.",
+                            "Kiểm tra Page đã subscribe app bằng GET /{page_id}/subscribed_apps; nếu data rỗng thì cần cấu hình webhook và subscribe lại Page.",
+                            "Nếu Page đã subscribe app, gửi một tin nhắn mới vào Page để mở thread mới hoặc request/take thread control cho thread cũ.",
+                            "Nếu thread cũ vẫn bị giữ, cần app đang giữ thread pass_thread_control hoặc dùng Page Inbox xử lý thủ công.",
+                        ]
+                    },
+                )
+            if error.action_required == "conversation_routing_not_enabled":
+                return FacebookSafeResponse.error(
+                    "Không lấy quyền hội thoại được vì Conversation Routing/Handover chưa được bật cho Page/app hiện tại.",
+                    error=error,
+                    data={
+                        "next_steps": [
+                            "Cấu hình Callback URL HTTPS và Verify Token trong Messenger API Setup trước.",
+                            "Subscribe Page vào app với các fields messages, messaging_postbacks, messaging_handovers.",
+                            "Xác nhận bằng GET /{page_id}/subscribed_apps; phải thấy app hiện trong data.",
+                            "Sau đó test lại bằng một khách mới nhắn vào Page, rồi mới xử lý thread cũ.",
+                        ]
+                    },
+                )
+            if error.action_required == "not_thread_owner":
+                return FacebookSafeResponse.error(
+                    "App hiện tại chưa phải owner của thread nên không thể pass hoặc thao tác quyền hội thoại.",
+                    error=error,
+                    data={
+                        "next_steps": [
+                            "Không gọi pass_thread_control khi app chưa giữ thread.",
+                            "Trước hết phải bật routing/subscription và take_thread_control thành công.",
+                            "Nếu không take được thread cũ, hãy test bằng hội thoại mới sau khi Page đã subscribe app.",
                         ]
                     },
                 )
@@ -227,7 +253,29 @@ class FacebookMessageSendTool(FacebookBaseTool):
                 bool(contact_query),
                 self.user_facebook_connection.get("graph_version") or settings.META_GRAPH_VERSION,
             )
-            data = await messenger.send_text(recipient_id=recipient_id, message_text=message_text)
+            try:
+                data = await messenger.send_text(recipient_id=recipient_id, message_text=message_text)
+            except MetaGraphError as error:
+                if error.action_required == "thread_control":
+                    request_result = await messenger.request_thread_control(
+                        recipient_id,
+                        metadata="OpenClaw agent requested control after send was blocked.",
+                    )
+                    return FacebookSafeResponse.error(
+                        "Chưa gửi được vì thread đang do app/Page Inbox khác giữ quyền. Hệ thống đã gửi request_thread_control tới Meta.",
+                        error=error,
+                        data={
+                            "recipient_id": recipient_id,
+                            "resolved": resolved,
+                            "request_thread_control": request_result,
+                            "next_steps": [
+                                "Đừng trả lời thủ công trong Business Suite trước khi agent gửi, vì Page Inbox có thể giữ thread.",
+                                "Nhờ khách nhắn lại một tin mới rồi cho agent trả lời ngay.",
+                                "Nếu thread vẫn bị chặn, Meta chưa cho app take control vì Conversation Routing không bật cho thread cũ.",
+                            ],
+                        },
+                    )
+                raise
             return FacebookSafeResponse.ok("Đã gửi tin nhắn Messenger.", data={"recipient_id": recipient_id, "resolved": resolved, "result": data})
         except Exception as e:
             return self._format_error(e)

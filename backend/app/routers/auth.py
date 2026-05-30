@@ -161,7 +161,7 @@ async def get_me(current_user: User = Depends(get_current_user), db: AsyncSessio
     )
     google_connection = google_result.scalars().first()
     user_data.is_google_connected = bool(
-        google_connection and (google_connection.refresh_token or google_connection.access_token)
+        google_connection and (google_connection.refresh_token or google_connection.access_token) and (google_connection.status or "active") == "active"
     )
     user_data.is_google_tool_connected = user_data.is_google_connected
     result = await db.execute(select(FacebookConnection).where(FacebookConnection.user_id == current_user.id))
@@ -432,7 +432,7 @@ async def google_callback(code: str, state: str, db: AsyncSession = Depends(get_
             await db.commit()
             
     # 3. Quay lại trang cấu hình Agent
-    redirect_url = f"{settings.ALLOWED_ORIGINS}/agents/create?google_tool_connected=success"
+    redirect_url = f"{settings.ALLOWED_ORIGINS}/connectors?google_tool_connected=success"
     if agent_id:
         redirect_url = f"{settings.ALLOWED_ORIGINS}/agents/create?id={agent_id}&google_tool_connected=success"
         
@@ -503,7 +503,7 @@ async def facebook_callback(code: str, state: str, db: AsyncSession = Depends(ge
         ],
     )
 
-    redirect_url = f"{settings.ALLOWED_ORIGINS}/agents/create?facebook_connected=success"
+    redirect_url = f"{settings.ALLOWED_ORIGINS}/connectors?facebook_connected=success"
     if agent_id:
         redirect_url = f"{settings.ALLOWED_ORIGINS}/agents/create?id={agent_id}&facebook_connected=success"
     return RedirectResponse(redirect_url)
@@ -563,6 +563,10 @@ class FacebookSelectPageRequest(BaseModel):
     page_id: str
 
 
+class ConnectorToggleRequest(BaseModel):
+    enabled: bool
+
+
 @router.post("/facebook/select-page")
 async def facebook_select_page(
     payload: FacebookSelectPageRequest,
@@ -592,6 +596,109 @@ async def facebook_select_page(
         "selected_page_id": connection.selected_page_id,
         "selected_page_name": connection.selected_page_name,
     }
+
+
+@router.get("/connectors")
+async def list_oauth_connectors(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    google_result = await db.execute(
+        select(GoogleToolConnection).where(GoogleToolConnection.user_id == current_user.id)
+    )
+    google_connection = google_result.scalars().first()
+
+    fb_result = await db.execute(select(FacebookConnection).where(FacebookConnection.user_id == current_user.id))
+    fb_connection = fb_result.scalars().first()
+
+    google_connected = bool(google_connection and (google_connection.refresh_token or google_connection.access_token))
+    google_enabled = bool(google_connected and (google_connection.status or "active") == "active")
+
+    facebook_connected = bool(fb_connection and fb_connection.selected_page_access_token)
+    facebook_enabled = bool(facebook_connected and (fb_connection.status or "active") == "active")
+
+    return {
+        "items": [
+            {
+                "key": "facebook",
+                "label": "Facebook",
+                "description": "Kết nối Fanpage và Messenger",
+                "connected": facebook_connected,
+                "enabled": facebook_enabled,
+                "status": (fb_connection.status if fb_connection else "disconnected"),
+                "account": fb_connection.facebook_user_name if fb_connection else None,
+                "meta": {
+                    "selected_page_id": fb_connection.selected_page_id if fb_connection else None,
+                    "selected_page_name": fb_connection.selected_page_name if fb_connection else None,
+                },
+            },
+            {
+                "key": "gmail",
+                "label": "Gmail",
+                "description": "Đọc, gửi và quản lý email",
+                "connected": google_connected,
+                "enabled": google_enabled,
+                "status": (google_connection.status if google_connection else "disconnected"),
+                "account": google_connection.google_account_email if google_connection else None,
+                "meta": {},
+            },
+        ]
+    }
+
+
+@router.post("/connectors/{provider}/toggle")
+async def toggle_oauth_connector(
+    provider: str,
+    payload: ConnectorToggleRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    provider = provider.lower().strip()
+    if provider == "facebook":
+        result = await db.execute(select(FacebookConnection).where(FacebookConnection.user_id == current_user.id))
+        conn = result.scalars().first()
+        if not conn:
+            raise HTTPException(status_code=404, detail="Facebook connector chưa được kết nối.")
+        conn.status = "active" if payload.enabled else "disabled"
+        await db.commit()
+        return {"success": True, "provider": "facebook", "enabled": payload.enabled, "status": conn.status}
+
+    if provider == "gmail":
+        result = await db.execute(select(GoogleToolConnection).where(GoogleToolConnection.user_id == current_user.id))
+        conn = result.scalars().first()
+        if not conn:
+            raise HTTPException(status_code=404, detail="Gmail connector chưa được kết nối.")
+        conn.status = "active" if payload.enabled else "disabled"
+        await db.commit()
+        return {"success": True, "provider": "gmail", "enabled": payload.enabled, "status": conn.status}
+
+    raise HTTPException(status_code=400, detail="Provider không hỗ trợ.")
+
+
+@router.post("/connectors/{provider}/reset")
+async def reset_oauth_connector(
+    provider: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    provider = provider.lower().strip()
+    if provider == "facebook":
+        result = await db.execute(select(FacebookConnection).where(FacebookConnection.user_id == current_user.id))
+        conn = result.scalars().first()
+        if conn:
+            await db.delete(conn)
+            await db.commit()
+        return {"success": True, "provider": "facebook", "status": "disconnected"}
+
+    if provider == "gmail":
+        result = await db.execute(select(GoogleToolConnection).where(GoogleToolConnection.user_id == current_user.id))
+        conn = result.scalars().first()
+        if conn:
+            await db.delete(conn)
+            await db.commit()
+        return {"success": True, "provider": "gmail", "status": "disconnected"}
+
+    raise HTTPException(status_code=400, detail="Provider không hỗ trợ.")
 
 @router.post("/logout")
 async def logout(response: Response):

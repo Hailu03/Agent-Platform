@@ -270,82 +270,168 @@ export default function SkillsPage() {
       </div>
 
       {/* Content */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {loading ? (
-          Array(3).fill(0).map((_, i) => (
-            <div key={i} className="h-48 rounded-[0.5rem] bg-muted/20 animate-pulse border" />
-          ))
-        ) : filteredItems.length > 0 ? (
-          filteredItems.map((item) => (
-            <Card key={item.id} className="rounded-[0.5rem] border shadow-sm hover:border-amber-500/30 transition-all group bg-white/70 dark:bg-white/5 backdrop-blur-xl overflow-hidden flex flex-col">
-              <CardContent className="p-6 flex-1">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="w-10 h-10 rounded-[0.5rem] bg-amber-500/10 flex items-center justify-center border shadow-sm group-hover:scale-110 transition-transform">
-                    <Zap className="w-5 h-5 text-amber-600" />
-                  </div>
-                   <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-[0.4rem] hover:bg-white hover:border shadow-sm">
-                        <MoreVertical className="w-4 h-4 text-muted-foreground" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="rounded-[0.5rem] border-muted-foreground/20 shadow-xl">
-                      <DropdownMenuItem 
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-8">
+        {/* Main Content Column: Skills Horizontal List-Rows */}
+        <div className="space-y-4">
+          {loading ? (
+            Array(3).fill(0).map((_, i) => (
+              <div key={i} className="h-24 rounded-2xl bg-muted/20 animate-pulse border" />
+            ))
+          ) : filteredItems.length > 0 ? (
+            <div className="space-y-3">
+              {filteredItems.map((item) => {
+                const agentsUsing = getAgentsUsingSkill(item);
+                return (
+                  <div
+                    key={item.id}
+                    className="flex flex-col md:flex-row md:items-center justify-between p-5 rounded-2xl border border-muted-foreground/10 bg-white/50 dark:bg-zinc-950/20 backdrop-blur-xl hover:border-amber-500/30 hover:shadow-lg hover:shadow-amber-500/[0.02] hover:-translate-y-0.5 transition-all duration-300 group gap-4 relative overflow-hidden"
+                  >
+                    {/* Ambient hover light glow */}
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/[0.01] rounded-full blur-3xl pointer-events-none group-hover:bg-amber-500/[0.03] transition-all duration-500" />
+                    
+                    {/* Column 1: Basic Info & Icon */}
+                    <div className="flex items-center gap-4 min-w-0 md:w-[280px] shrink-0">
+                      <div className="w-11 h-11 rounded-xl bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 flex items-center justify-center shadow-inner group-hover:scale-105 transition-transform duration-300">
+                        <Zap className="w-5 h-5 text-amber-600 dark:text-amber-500" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="font-bold text-sm text-foreground/90 truncate group-hover:text-amber-600 transition-colors" title={item.name}>
+                          {item.name}
+                        </h3>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[9px] font-mono text-muted-foreground/50">ID: {item.id.slice(0, 8)}</span>
+                          <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-500 border-none text-[8px] h-3.5 px-1.5 font-bold uppercase rounded">Custom</Badge>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Column 2: Short Description */}
+                    <div className="flex-1 min-w-0 pr-4">
+                      <p className="text-[12px] text-muted-foreground line-clamp-2 leading-relaxed font-medium">
+                        {item.description || "Không có mô tả chi tiết cho kỹ năng này."}
+                      </p>
+                    </div>
+
+                    {/* Column 3: Linked Agents */}
+                    <div className="flex items-center gap-1.5 flex-wrap md:w-[200px] shrink-0">
+                      {agentsUsing.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {agentsUsing.map(agent => (
+                            <Badge key={agent.id} variant="secondary" className="bg-primary/5 text-primary border-none text-[9px] font-bold py-0.5 px-2 rounded flex items-center gap-1">
+                              <Bot className="w-2.5 h-2.5" />
+                              <span className="max-w-[70px] truncate">{agent.name}</span>
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground/40 italic font-medium">Chưa gán cho Agent</span>
+                      )}
+                    </div>
+
+                    {/* Column 4: Administrative Actions */}
+                    <div className="flex items-center justify-end gap-1.5 shrink-0">
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-8 rounded-lg text-xs font-bold hover:bg-amber-500/10 hover:text-amber-600 transition-all border border-transparent hover:border-amber-500/10"
                         onClick={() => {
                           setEditingSkill(item);
                           setIsEditOpen(true);
                         }}
-                        className="rounded-md text-[11px] font-bold py-2.5 cursor-pointer"
                       >
-                        <Settings className="w-3.5 h-3.5 mr-2" /> Chỉnh sửa
-                      </DropdownMenuItem>
-                      {getAgentsUsingSkill(item).map(agent => (
-                        <DropdownMenuItem
-                          key={agent.id}
-                          onClick={() => handleRemoveSkillFromAgent(item.name, agent.id)}
-                          className="rounded-md text-[11px] font-bold py-2.5 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
-                        >
-                          <Trash2 className="w-3.5 h-3.5 mr-2" /> Gỡ khỏi {agent.name}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                        <Settings className="w-3.5 h-3.5 mr-1" /> Chỉnh sửa
+                      </Button>
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-muted border border-transparent shadow-sm">
+                            <MoreVertical className="w-4 h-4 text-muted-foreground" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="rounded-xl border-muted-foreground/15 shadow-xl w-48">
+                          {agentsUsing.map(agent => (
+                            <DropdownMenuItem
+                              key={agent.id}
+                              onClick={() => handleRemoveSkillFromAgent(item.name, agent.id)}
+                              className="rounded-lg text-[11px] font-bold py-2 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 mr-2" /> Gỡ khỏi {agent.name}
+                            </DropdownMenuItem>
+                          ))}
+                          <DropdownMenuItem
+                            onClick={() => handleDeleteSkill(item.id)}
+                            className="rounded-lg text-[11px] font-bold py-2 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10 border-t mt-1 pt-2"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 mr-2" /> Xóa hoàn toàn
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="py-20 text-center bg-white/30 dark:bg-zinc-950/10 rounded-2xl border border-dashed flex flex-col items-center justify-center p-6">
+              <BrainCircuit className="w-12 h-12 mb-4 opacity-20 text-primary" />
+              <p className="font-bold text-muted-foreground text-sm">Không tìm thấy kỹ năng phù hợp</p>
+            </div>
+          )}
+        </div>
+
+        {/* Right Telemetry & Guidance Rail */}
+        <div className="hidden xl:flex flex-col gap-6">
+          {/* Tracker Metrics */}
+          <Card className="rounded-2xl border border-muted-foreground/10 bg-white/40 dark:bg-zinc-950/20 backdrop-blur-xl shadow-sm overflow-hidden relative">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-primary/5 rounded-full blur-2xl pointer-events-none" />
+            <CardHeader className="p-5 border-b shrink-0 bg-muted/5">
+              <CardTitle className="text-[10px] font-mono tracking-widest text-muted-foreground/70 uppercase">Trạng thái Phân phối</CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-4">
+              <div>
+                <div className="flex justify-between items-baseline mb-1">
+                  <span className="text-2xl font-black text-foreground">{items.length}</span>
+                  <span className="text-[10px] text-muted-foreground font-mono">TỔNG KỸ NĂNG</span>
                 </div>
+                <p className="text-[10px] text-muted-foreground/60 leading-normal font-medium">Kỹ năng được lưu dưới dạng Prompt Directive tùy biến để nhúng trực tiếp.</p>
+              </div>
 
-                <h3 className="font-bold text-lg text-foreground/90 mb-2 truncate" title={item.name}>{item.name}</h3>
-                <p className="text-[12px] text-muted-foreground line-clamp-2 leading-relaxed mb-6 h-10">
-                  {item.description || "Không có mô tả."}
-                </p>
-
-                <div className="mt-auto pt-4 border-t border-dashed border-muted-foreground/10">
-                  <div className="flex flex-wrap gap-2">
-                    {getAgentsUsingSkill(item).length > 0 ? (
-                      getAgentsUsingSkill(item).map(agent => (
-                        <Badge key={agent.id} variant="secondary" className="bg-primary/10 text-primary hover:bg-primary/20 border-none text-[10px] py-1 px-2.5 rounded-lg flex items-center gap-1.5 transition-colors">
-                          <Bot className="w-3 h-3" />
-                          <span className="max-w-[100px] truncate">{agent.name}</span>
-                        </Badge>
-                      ))
-                    ) : (
-                      <span className="text-[10px] text-muted-foreground italic opacity-50">Chưa gán cho Agent nào</span>
-                    )}
+              <div className="border-t pt-4 space-y-3">
+                <div>
+                  <div className="flex justify-between text-[10px] font-bold text-muted-foreground uppercase mb-1">
+                    <span>Đã liên kết Agent</span>
+                    <span>{Math.round((items.filter(item => getAgentsUsingSkill(item).length > 0).length / (items.length || 1)) * 100)}%</span>
+                  </div>
+                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-amber-500 rounded-full transition-all duration-500" 
+                      style={{ width: `${(items.filter(item => getAgentsUsingSkill(item).length > 0).length / (items.length || 1)) * 100}%` }}
+                    />
                   </div>
                 </div>
-              </CardContent>
-              <div className="px-6 py-4 bg-muted/10 border-t flex items-center justify-between shrink-0">
-                <span className="text-[10px] font-bold text-muted-foreground uppercase opacity-50 tracking-wider">Custom Skill</span>
-                <Badge className="bg-amber-500/10 text-amber-600 border-none rounded-full text-[9px] font-bold px-2.5 py-0.5">
-                  {item.id.slice(0, 8)}
-                </Badge>
               </div>
-            </Card>
-          ))
-        ) : (
-          <div className="col-span-full py-20 text-center bg-white/40 rounded-[0.5rem] border border-dashed flex flex-col items-center">
-            <BrainCircuit className="w-12 h-12 mb-4 opacity-20 text-primary" />
-            <p className="font-bold text-muted-foreground">Bạn chưa thiết kế kỹ năng nào</p>
-          </div>
-        )}
+            </CardContent>
+          </Card>
+
+          {/* Handbook Guide */}
+          <Card className="rounded-2xl border border-muted-foreground/10 bg-white/40 dark:bg-zinc-950/20 backdrop-blur-xl shadow-sm overflow-hidden relative">
+            <CardHeader className="p-5 border-b shrink-0 bg-muted/5">
+              <CardTitle className="text-[10px] font-mono tracking-widest text-muted-foreground/70 uppercase flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" /> Cẩm nang Directive
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-3 text-[11px] text-muted-foreground font-medium leading-relaxed">
+              <div className="p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/10 text-amber-700 dark:text-amber-500">
+                <strong className="block mb-1 text-xs">Cấu trúc tốt nhất:</strong>
+                Sử dụng cú pháp Markdown phân cấp rõ ràng (dùng #, ##, 1. 2.) để LLM phân tách chỉ chỉ dễ dàng nhất.
+              </div>
+              <div className="space-y-2 pt-1 pl-1">
+                <p>• Phân chia rõ ràng giữa **Mục tiêu chính** và **Các ràng buộc cấm kỵ**.</p>
+                <p>• Viết kèm ví dụ Few-Shot mẫu để tăng độ chuẩn xác phản hồi của Agent.</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       {/* Create Skill Modal */}

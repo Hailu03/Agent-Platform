@@ -4,7 +4,6 @@ import { useState, useEffect, useRef, Suspense } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
 import {
   Bot,
   Settings,
@@ -26,12 +25,7 @@ import {
   X,
   Database,
   Edit2,
-  Terminal,
-  Layers,
-  Users,
-  BrainCircuit,
   Zap,
-  MoreHorizontal,
   Power,
   Mail,
   Search,
@@ -41,9 +35,11 @@ import {
   Globe,
   CheckCircle2,
   AlertCircle,
-  RefreshCcw,
-  Activity,
   MessageSquare,
+  Terminal,
+  Copy,
+  FileCode,
+  Activity,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { ChatInterface } from "@/components/shared/ChatInterface";
@@ -73,7 +69,6 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -193,9 +188,6 @@ function ToolItem({
   onSettings?: () => void,
   children?: React.ReactNode
 }) {
-  const { addNotification } = useNotifications();
-  const { user } = useAuth();
-
   return (
     <div className={cn(
       "border-b last:border-b-0 transition-all duration-300 group hover:bg-muted/30",
@@ -332,26 +324,9 @@ function CreateAgentContent() {
   const { user, refreshUser } = useAuth();
   const [showApiKey, setShowApiKey] = useState(false);
   const [showEmbeddingApiKey, setShowEmbeddingApiKey] = useState(false);
-  const [initialKeys, setInitialKeys] = useState({ api_key: "", embedding_api_key: "" });
-
   const [activeTab, setActiveTab] = useState("general");
   const [showPreview, setShowPreview] = useState(true);
   const [isOtherSpecialty, setIsOtherSpecialty] = useState(false);
-  const [messages, setMessages] = useState<{
-    role: string,
-    content: string,
-    thinking?: string,
-    done?: boolean,
-    status?: string,
-    interrupt?: {
-      action: string;
-      tool_name: string;
-      tool_args: any;
-      message: string;
-    } | null
-  }[]>([
-    { role: "assistant", content: "Chào bạn! Tôi là AI Agent của bạn. Hãy thiết lập cấu hình bên trái rồi bắt đầu hội thoại nhé.", done: true }
-  ]);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -361,7 +336,7 @@ function CreateAgentContent() {
     model_name: "gpt-4o",
     api_key: "",
     instructions: "",
-    tools: [] as { name: string, is_active: boolean, config?: any }[],
+    tools: [] as { name: string, is_active: boolean, config?: Record<string, unknown> }[],
     skills: [] as { name: string, is_active: boolean }[],
     knowledge_files: [] as { filename: string, url: string, object_name: string, status?: "pending" | "indexing" | "completed" | "error", task_id?: string }[],
 
@@ -375,6 +350,21 @@ function CreateAgentContent() {
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+
+  const [showAddTool, setShowAddTool] = useState(false);
+  const [showAddSkill, setShowAddSkill] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => void;
+  }>({
+    open: false,
+    title: "",
+    description: "",
+    onConfirm: () => { },
+  });
+
   const isDataLoadedRef = useRef(false);
 
   useEffect(() => {
@@ -422,16 +412,17 @@ function CreateAgentContent() {
       document.removeEventListener("click", handleInternalNavigation, true);
     };
   }, [isDirty, router]);
+
   const [availableTools, setAvailableTools] = useState<{ name: string, label?: string, description: string, icon: string, category?: string }[]>([]);
   const [availableSkills, setAvailableSkills] = useState<{ id: string, name: string, description: string, content: string, is_template: boolean, required_tools?: string[] }[]>([]);
-  const [previewSkill, setPreviewSkill] = useState<any>(null);
+  const [previewSkill, setPreviewSkill] = useState<typeof availableSkills[0] | null>(null);
   const [isCreateSkillOpen, setIsCreateSkillOpen] = useState(false);
   const [newSkill, setNewSkill] = useState({ name: "", description: "", content: "" });
   const [editingSkillId, setEditingSkillId] = useState<string | null>(null);
   const [isCreatingSkill, setIsCreatingSkill] = useState(false);
   const [skillTab, setSkillTab] = useState<"edit" | "preview">("edit");
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({ "Gmail": true, "Cơ bản": true, "Database": true });
-  const [availableConnections, setAvailableConnections] = useState<any[]>([]);
+  const [availableConnections, setAvailableConnections] = useState<{ id: string, name: string, engine: string }[]>([]);
   const [showAddConnection, setShowAddConnection] = useState(false);
   const [availableToolSearch, setAvailableToolSearch] = useState("");
   const [facebookPages, setFacebookPages] = useState<{ id: string; name: string; category?: string; tasks?: string[] }[]>([]);
@@ -449,7 +440,7 @@ function CreateAgentContent() {
     username: "",
     plain_password: "",
     schema_name: "public",
-    extra_params: {} as any,
+    extra_params: {} as Record<string, unknown>,
     ssl: false,
     instructions: "",
     sql_samples: ""
@@ -457,7 +448,27 @@ function CreateAgentContent() {
   const [editingConnectionId, setEditingConnectionId] = useState<string | null>(null);
   const [isDataSourceSelectOpen, setIsDataSourceSelectOpen] = useState(false);
   const [showToolConfig, setShowToolConfig] = useState(false);
-  const [editingTool, setEditingTool] = useState<any>(null);
+  const [editingTool, setEditingTool] = useState<{
+    name: string;
+    is_active: boolean;
+    config?: Record<string, unknown>;
+    info?: {
+      name: string;
+      label?: string;
+      description: string;
+      icon: string;
+      category?: string;
+      supported_params?: {
+        key: string;
+        label: string;
+        type: string;
+        default?: string | number;
+        desc?: string;
+        options?: { value: string; label: string }[];
+      }[];
+    };
+    params?: Record<string, unknown>;
+  } | null>(null);
   const [toolOverrideData, setToolOverrideData] = useState({ label: "", description: "" });
   const [previewWidth, setPreviewWidth] = useState(480);
   const [isResizing, setIsResizing] = useState(false);
@@ -470,9 +481,7 @@ function CreateAgentContent() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
-
-      // Khung chat nằm bên phải, nên khi kéo về bên trái (X giảm) thì width tăng
-      const newWidth = window.innerWidth - e.clientX - 16; // 16 là padding
+      const newWidth = window.innerWidth - e.clientX;
       if (newWidth > 320 && newWidth < 800) {
         setPreviewWidth(newWidth);
       }
@@ -493,7 +502,7 @@ function CreateAgentContent() {
     };
   }, [isResizing]);
 
-  const handleToolConfigChange = (toolName: string, config: any) => {
+  const handleToolConfigChange = (toolName: string, config: Record<string, unknown>) => {
     setFormData(prev => ({
       ...prev,
       tools: prev.tools.map(t => t.name === toolName ? { ...t, config: { ...t.config, ...config } } : t)
@@ -592,29 +601,34 @@ function CreateAgentContent() {
   };
 
 
-  // Tự động chuyển đổi công cụ "Gmail" cũ sang bộ 7 công cụ mới
   useEffect(() => {
     if (availableTools.length > 0 && formData.tools.some(t => t.name === "Gmail")) {
       const gmailTools = availableTools.filter(t => t.category === "Gmail");
       if (gmailTools.length > 0) {
-        setFormData(prev => {
-          const otherTools = prev.tools.filter(t => t.name !== "Gmail");
-          const newGmailTools = gmailTools
-            .filter(gt => !otherTools.find(ot => ot.name === gt.name))
-            .map(gt => ({ name: gt.name, is_active: true }));
+        const timeout = setTimeout(() => {
+          setFormData(prev => {
+            const otherTools = prev.tools.filter(t => t.name !== "Gmail");
+            const newGmailTools = gmailTools
+              .filter(gt => !otherTools.find(ot => ot.name === gt.name))
+              .map(gt => ({ name: gt.name, is_active: true }));
 
-          return {
-            ...prev,
-            tools: [...otherTools, ...newGmailTools]
-          };
-        });
+            return {
+              ...prev,
+              tools: [...otherTools, ...newGmailTools]
+            };
+          });
+        }, 0);
+        return () => clearTimeout(timeout);
       }
     }
   }, [availableTools, formData.tools]);
 
   useEffect(() => {
     if (user?.is_facebook_connected) {
-      fetchFacebookPages(false);
+      const timeout = setTimeout(() => {
+        fetchFacebookPages(false);
+      }, 0);
+      return () => clearTimeout(timeout);
     }
   }, [user?.is_facebook_connected]);
 
@@ -623,14 +637,16 @@ function CreateAgentContent() {
       addNotification("success", "Đã kết nối Google", "Gmail tools đã sẵn sàng cho agent này.");
       refreshUser();
     }
-  }, [searchParams, refreshUser]);
+  }, [searchParams, refreshUser, addNotification]);
 
   useEffect(() => {
     if (searchParams.get("facebook_connected") === "success") {
       addNotification("success", "Đã kết nối Facebook", "Bây giờ bạn có thể chọn Fanpage để Agent quản lý.");
-      refreshUser().then(() => fetchFacebookPages(true));
+      refreshUser().then(() => {
+        fetchFacebookPages(true);
+      });
     }
-  }, [searchParams, refreshUser]);
+  }, [searchParams, refreshUser, fetchFacebookPages, addNotification]);
 
   const handleCreateSkill = async () => {
     if (!newSkill.name || !newSkill.content) {
@@ -652,7 +668,6 @@ function CreateAgentContent() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error("Skill creation failed:", errorData);
         throw new Error("Failed to create skill");
       }
 
@@ -663,7 +678,6 @@ function CreateAgentContent() {
         setAvailableSkills(prev => prev.map(s => s.id === editingSkillId ? created : s));
       } else {
         setAvailableSkills(prev => [...prev, created]);
-        // Tự động chọn skill vừa tạo cho agent
         setFormData(prev => ({ ...prev, skills: [...prev.skills, { name: created.name, is_active: true }] }));
       }
 
@@ -677,21 +691,6 @@ function CreateAgentContent() {
       setIsCreatingSkill(false);
     }
   };
-  const [showAddTool, setShowAddTool] = useState(false);
-  const [showAddSkill, setShowAddSkill] = useState(false);
-  const [confirmConfig, setConfirmConfig] = useState<{
-    open: boolean;
-    title: string;
-    description: string;
-    onConfirm: () => void;
-  }>({
-    open: false,
-    title: "",
-    description: "",
-    onConfirm: () => { },
-  });
-
-
 
   useEffect(() => {
     const fetchDependencies = async () => {
@@ -715,49 +714,41 @@ function CreateAgentContent() {
     fetchDependencies();
   }, []);
 
-  // 1. Khôi phục bản nháp từ LocalStorage (sau khi quay lại từ Google OAuth)
   useEffect(() => {
     const draft = localStorage.getItem("agent_form_draft");
     if (draft) {
       try {
         const draftData = JSON.parse(draft);
-        setFormData(prev => ({ ...prev, ...draftData }));
-        localStorage.removeItem("agent_form_draft"); // Xóa ngay sau khi khôi phục
-        addNotification("success", "Khôi phục", "Đã khôi phục dữ liệu bạn đang nhập dở.");
+        const timeout = setTimeout(() => {
+          setFormData(prev => ({ ...prev, ...draftData }));
+          localStorage.removeItem("agent_form_draft");
+          addNotification("success", "Khôi phục", "Đã khôi phục dữ liệu bạn đang nhập dở.");
+        }, 0);
+        return () => clearTimeout(timeout);
       } catch (e) {
         console.error("Failed to parse draft:", e);
       }
     }
-  }, []);
+  }, [addNotification]);
+
+  const [initialKeys, setInitialKeys] = useState({ api_key: "", embedding_api_key: "" });
 
   useEffect(() => {
-    console.log("DEBUG: AgentId detected:", agentId);
     if (agentId) {
       const fetchAgent = async () => {
         setIsLoadingData(true);
         const token = localStorage.getItem("access_token");
         if (!token) {
-          addNotification("error", "Lỗi xác thực", "Không tìm thấy Token đăng nhập. Vui lòng đăng nhập lại.");
+          addNotification("error", "Lỗi xác thực", "Không tìm thấy Token đăng nhập.");
           setIsLoadingData(false);
           return;
         }
 
         try {
-          console.log(`DEBUG: Calling API: /agents/${agentId}`);
           const res = await fetchWithAuth(`/agents/${agentId}`);
 
           if (res.ok) {
             const data = await res.json();
-            console.log("DEBUG: Data received from Backend:", data);
-
-            // Cập nhật state với dữ liệu thực tế
-            const normalizeList = (list: any[]) => {
-              return (list || []).map(item => {
-                if (typeof item === 'string') return { name: item, is_active: true };
-                return item;
-              });
-            };
-
             setFormData({
               name: data.name || "",
               description: data.description || "",
@@ -779,34 +770,22 @@ function CreateAgentContent() {
               embedding_api_key: data.embedding_api_key || ""
             });
 
-            // Kiểm tra xem chuyên môn có nằm trong danh sách mặc định không
             const defaults = [
-              "Chăm sóc khách hàng",
-              "Tư vấn Bán hàng",
-              "Phân tích & Nghiên cứu",
-              "Sáng tạo Nội dung",
-              "Lập trình & Kỹ thuật",
-              "Pháp lý & Luật",
-              "Tài chính & Kế toán",
-              "Nhân sự & Tuyển dụng",
-              "Giáo dục & Đào tạo",
-              "Dịch thuật & Ngôn ngữ"
+              "Chăm sóc khách hàng", "Tư vấn Bán hàng", "Phân tích & Nghiên cứu", "Sáng tạo Nội dung",
+              "Lập trình & Kỹ thuật", "Pháp lý & Luật", "Tài chính & Kế toán", "Nhân sự & Tuyển dụng",
+              "Giáo dục & Đào tạo", "Dịch thuật & Ngôn ngữ"
             ];
             if (data.specialty && !defaults.includes(data.specialty)) {
               setIsOtherSpecialty(true);
             }
           } else {
             const errorData = await res.json().catch(() => ({ detail: "Lỗi không xác định" }));
-            const msg = `Không thể tải dữ liệu (Mã lỗi: ${res.status}). Chi tiết: ${errorData.detail || res.statusText}`;
-            console.error(msg);
-            addNotification("error", "Lỗi tải dữ liệu", msg);
+            addNotification("error", "Lỗi tải dữ liệu", errorData.detail || "Không thể tải dữ liệu");
           }
         } catch (error) {
-          console.error("DEBUG: Fetch error:", error);
-          addNotification("error", "Lỗi kết nối", "Lỗi kết nối tới Server. Vui lòng kiểm tra Backend đang chạy.");
+          addNotification("error", "Lỗi kết nối", "Lỗi kết nối tới Server.");
         } finally {
           setIsLoadingData(false);
-          // Đánh dấu đã load xong để bắt đầu theo dõi thay đổi (isDirty)
           setTimeout(() => {
             isDataLoadedRef.current = true;
           }, 1000);
@@ -815,7 +794,6 @@ function CreateAgentContent() {
       fetchAgent();
     }
 
-    // Luôn fetch danh sách tool hỗ trợ từ server
     const fetchAvailableTools = async () => {
       try {
         const [toolsRes, connRes] = await Promise.all([
@@ -835,7 +813,7 @@ function CreateAgentContent() {
       }
     };
     fetchAvailableTools();
-  }, [agentId]);
+  }, [agentId, addNotification]);
 
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const handleTestConnection = async () => {
@@ -872,13 +850,11 @@ function CreateAgentContent() {
             clearInterval(interval);
             setIndexingTask({ id: taskId, status: "completed" });
             addNotification("success", "Hoàn tất", "Đã lập chỉ mục nguồn dữ liệu thành công.");
-            // Refresh danh sách connections
             const connRes = await fetchWithAuth("/connections");
             if (connRes.ok) {
               const data = await connRes.json();
               setAvailableConnections(data);
             }
-            // Đóng sau 1.5s
             setTimeout(() => {
               setShowAddConnection(false);
               setIndexingTask(null);
@@ -923,7 +899,6 @@ function CreateAgentContent() {
         const result = await res.json();
         addNotification("success", "Thành công", editingConnectionId ? "Đã cập nhật kết nối." : "Đã khởi tạo kết nối. Đang lập chỉ mục...");
 
-        // Tự động gán cho tool text2sql
         setFormData(prev => ({
           ...prev,
           tools: prev.tools.map(t => t.name === "text2sql" ? { ...t, config: { ...t.config, datasource_id: result.id } } : t)
@@ -947,19 +922,17 @@ function CreateAgentContent() {
   };
 
   const handleDeleteConnection = async (dsId: string) => {
-    if (!confirm("Bạn có chắc chắn muốn xóa kết nối này? Toàn bộ tri thức liên quan trong Đồ thị sẽ bị xóa sạch.")) return;
+    if (!confirm("Bạn có chắc chắn muốn xóa kết nối này?")) return;
 
     try {
       const res = await fetchWithAuth(`/connections/${dsId}`, { method: "DELETE" });
       if (res.ok) {
-        addNotification("success", "Đã xóa", "Đã xóa kết nối và dọn dẹp tri thức thành công.");
-        // Refresh list
+        addNotification("success", "Đã xóa", "Đã xóa kết nối thành công.");
         const connRes = await fetchWithAuth("/connections");
         if (connRes.ok) {
           const data = await connRes.json();
           setAvailableConnections(data);
         }
-        // Nếu datasource đang được chọn thì bỏ chọn
         if (formData.tools.find(t => t.name === "text2sql")?.config?.datasource_id === dsId) {
           handleToolConfigChange("text2sql", { datasource_id: null });
         }
@@ -980,13 +953,12 @@ function CreateAgentContent() {
       database: ds.database,
       schema_name: ds.schema_name,
       username: ds.username,
-      plain_password: "", // Không lấy lại password cũ vì lý do bảo mật
+      plain_password: "",
       extra_params: ds.extra_params || {},
       ssl: ds.ssl || false,
       instructions: ds.instructions || "",
       sql_samples: ds.sql_samples || ""
     });
-    // Lưu ID để biết là đang update
     setEditingConnectionId(ds.id);
     setShowAddConnection(true);
   };
@@ -1009,14 +981,12 @@ function CreateAgentContent() {
 
       const result = await res.json();
 
-      // Thêm vào danh sách với trạng thái indexing
       const newFile = { ...result, status: "indexing" as const };
       setFormData(prev => ({
         ...prev,
         knowledge_files: [...prev.knowledge_files, newFile]
       }));
 
-      // Kích hoạt Indexing ngay lập tức
       const indexRes = await fetchWithAuth("/agents/index", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1035,22 +1005,18 @@ function CreateAgentContent() {
 
       if (indexRes.ok) {
         const { task_id } = await indexRes.json();
-
-        // Cập nhật task_id và bắt đầu polling
         setFormData(prev => ({
           ...prev,
           knowledge_files: prev.knowledge_files.map(f =>
             f.object_name === result.object_name ? { ...f, task_id } : f
           )
         }));
-
         startPollingStatus(task_id, result.object_name);
       } else {
         throw new Error("Indexing trigger failed");
       }
 
     } catch (error) {
-      console.error(error);
       addNotification("error", "Lỗi tải file", "Không thể tải hoặc xử lý tài liệu.");
     } finally {
       setIsUploading(false);
@@ -1069,19 +1035,12 @@ function CreateAgentContent() {
               const newFiles = prev.knowledge_files.map(f =>
                 f.object_name === objectName ? { ...f, status: "completed" as const } : f
               );
-
-              // Auto-save knowledge files after indexing success
               if (agentId) {
-                // Sử dụng setTimeout để đẩy handleSave ra khỏi render cycle của React
                 setTimeout(() => {
                   handleSave({ ...prev, knowledge_files: newFiles });
                 }, 0);
               }
-
-              return {
-                ...prev,
-                knowledge_files: newFiles
-              };
+              return { ...prev, knowledge_files: newFiles };
             });
             addNotification("success", "Indexing hoàn tất", `Tài liệu ${objectName.split('/').pop()} đã sẵn sàng.`);
           } else if (data.status === "FAILURE") {
@@ -1109,7 +1068,6 @@ function CreateAgentContent() {
     }
 
     setIsSaving(true);
-
     const baseData = customPayload || formData;
     const payload = {
       ...baseData,
@@ -1125,18 +1083,13 @@ function CreateAgentContent() {
       });
 
       if (!res.ok) throw new Error("Save failed");
-
-      setIsDirty(false); // Reset dirty state after successful save
-
+      setIsDirty(false);
       if (!agentId) {
         const data = await res.json();
-        if (data.id) {
-          router.push(`/agents/create?id=${data.id}`);
-        }
+        if (data.id) router.push(`/agents/create?id=${data.id}`);
       }
     } catch (error) {
-      console.error(error);
-      addNotification("error", "Lỗi hệ thống", "Không thể lưu thông tin Agent. Vui lòng thử lại sau.");
+      addNotification("error", "Lỗi hệ thống", "Không thể lưu thông tin Agent.");
     } finally {
       setIsSaving(false);
     }
@@ -1155,16 +1108,11 @@ function CreateAgentContent() {
           </div>
         </div>
       )}
-      {/* --- Left Side: Configuration --- */}
       <div className={cn(
         "flex-1 overflow-y-auto transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] custom-scrollbar",
         showPreview ? "pl-8 pr-6 pt-0 pb-12" : "pl-10 pr-10 pt-0 pb-20"
       )}>
-        <div className={cn(
-          "space-y-3 pt-5 transition-all duration-500 mx-auto w-full",
-          "max-w-4xl"
-        )}>
-          {/* Header Section */}
+        <div className={cn("space-y-3 pt-5 transition-all duration-500 mx-auto w-full", showPreview ? "max-w-5xl" : "max-w-[980px]")}>
           <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
             <div className="space-y-1.5 flex-1">
               <Link href="/agents" className="inline-flex items-center text-[10px] font-bold text-muted-foreground/40 hover:text-primary transition-all group">
@@ -1187,7 +1135,6 @@ function CreateAgentContent() {
                   Thử nghiệm
                 </Button>
               )}
-              {/* Divider only if Test button is shown */}
               {!showPreview && <div className="w-[1px] h-3 bg-border mx-0.5" />}
               <Button
                 onClick={() => handleSave()}
@@ -1200,876 +1147,902 @@ function CreateAgentContent() {
             </div>
           </div>
 
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-6">
-            <TabsList className="flex h-12 w-full max-w-full mx-auto rounded-[1.0rem] bg-muted/10 p-1 text-muted-foreground border shadow-sm overflow-hidden">
-              <TabsTrigger value="general" className="flex-1 h-full rounded-lg px-1 gap-1.5 data-[state=active]:bg-white data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all text-[11px] font-bold min-w-0">
-                <Settings className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">Cấu hình</span>
-              </TabsTrigger>
-              <TabsTrigger value="intelligence" className="flex-1 h-full rounded-lg px-1 gap-1.5 data-[state=active]:bg-white data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all text-[11px] font-bold min-w-0">
-                <Bot className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">Huấn luyện</span>
-              </TabsTrigger>
-              <TabsTrigger value="capabilities" className="flex-1 h-full rounded-lg px-1 gap-1.5 data-[state=active]:bg-white data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all text-[11px] font-bold min-w-0">
-                <Wrench className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">Công cụ</span>
-              </TabsTrigger>
-              <TabsTrigger value="automation" className="flex-1 h-full rounded-lg px-1 gap-1.5 data-[state=active]:bg-white data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all text-[11px] font-bold min-w-0">
-                <Clock className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">Quy trình</span>
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="general" className="space-y-2 animate-in fade-in duration-200 min-h-[500px]">
-              <section className="space-y-2">
-                <div className="flex items-center gap-2 px-1">
-                  <h2 className="text-xl font-bold">Chi tiết trợ lý</h2>
-                </div>
-
-                <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
-                  <CardContent className="px-8 py-2 space-y-5">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                      <div className="space-y-4">
-                        <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Tên Agent</label>
-                        <Input
-                          placeholder="Nhập tên cho Agent..."
-                          className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50"
-                          value={formData.name}
-                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-4">
-                        <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Chuyên môn nghiệp vụ</label>
-                        <div className="flex gap-2 items-center">
-                          <div className={cn("transition-all duration-500", isOtherSpecialty ? "w-[160px]" : "w-full")}>
-                            <Select
-                              value={isOtherSpecialty ? "other" : formData.specialty}
-                              onValueChange={(val) => {
-                                if (val === "other") {
-                                  setIsOtherSpecialty(true);
-                                  setFormData({ ...formData, specialty: "" });
-                                } else {
-                                  setIsOtherSpecialty(false);
-                                  setFormData({ ...formData, specialty: val || "" });
-                                }
-                              }}
-                            >
-                              <SelectTrigger className="rounded-[0.5rem] h-12 border-muted-foreground/20 bg-background/50 focus:ring-primary/20">
-                                <SelectValue placeholder="Chọn lĩnh vực">
-                                  {isOtherSpecialty ? "Khác..." : undefined}
-                                </SelectValue>
-                              </SelectTrigger>
-                              <SelectContent className="rounded-[0.5rem] border-muted-foreground/20 shadow-2xl">
-                                <SelectItem value="Chăm sóc khách hàng" className="rounded-xl">Chăm sóc khách hàng</SelectItem>
-                                <SelectItem value="Tư vấn Bán hàng" className="rounded-xl">Tư vấn Bán hàng</SelectItem>
-                                <SelectItem value="Phân tích & Nghiên cứu" className="rounded-xl">Phân tích & Nghiên cứu</SelectItem>
-                                <SelectItem value="Sáng tạo Nội dung" className="rounded-xl">Sáng tạo Nội dung</SelectItem>
-                                <SelectItem value="Lập trình & Kỹ thuật" className="rounded-xl">Lập trình & Kỹ thuật</SelectItem>
-                                <SelectItem value="Pháp lý & Luật" className="rounded-xl">Pháp lý & Luật</SelectItem>
-                                <SelectItem value="Tài chính & Kế toán" className="rounded-xl">Tài chính & Kế toán</SelectItem>
-                                <SelectItem value="Nhân sự & Tuyển dụng" className="rounded-xl">Nhân sự & Tuyển dụng</SelectItem>
-                                <SelectItem value="Giáo dục & Đào tạo" className="rounded-xl">Giáo dục & Đào tạo</SelectItem>
-                                <SelectItem value="Dịch thuật & Ngôn ngữ" className="rounded-xl">Dịch thuật & Ngôn ngữ</SelectItem>
-                                <SelectItem value="other" className="rounded-xl font-bold text-primary">Khác...</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          {isOtherSpecialty && (
-                            <div className="flex-1 animate-in fade-in zoom-in-95 slide-in-from-left-4 duration-500">
-                              <Input
-                                placeholder="Mô tả chuyên môn cụ thể..."
-                                className="rounded-[0.5rem] h-12 border-primary/20 bg-primary/[0.02] focus:ring-primary/20 border-dashed"
-                                value={formData.specialty}
-                                onChange={(e) => setFormData({ ...formData, specialty: e.target.value })}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Mô tả nhiệm vụ & Vai trò</label>
-                      <Textarea
-                        placeholder="Mô tả cụ thể trách nhiệm mà Agent này sẽ đảm nhận trong quy trình của bạn..."
-                        className="rounded-[0.5rem] min-h-[100px] resize-none border-muted-foreground/20 bg-background/50"
-                        value={formData.description}
-                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-              </section>
-
-              <section className="space-y-2 pt-4">
-                <div className="flex items-center gap-2 px-1">
-                  <h2 className="text-xl font-bold">Chọn Model LLM</h2>
-                </div>
-
-                <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
-                  <CardContent className="px-8 py-2 grid grid-cols-1 md:grid-cols-2 gap-1">
-                    <div className="space-y-4">
-                      <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Bên cung cấp</label>
-                      <Select
-                        value={formData.model_provider}
-                        onValueChange={(val) => {
-                          if (val) {
-                            const defaultModel = PROVIDER_MODELS[val]?.[0]?.value || "";
-                            setFormData({
-                              ...formData,
-                              model_provider: val,  
-                              model_name: defaultModel,
-                            });
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="rounded-[0.5rem] h-12 border-muted-foreground/20 bg-background/50">
-                          <SelectValue placeholder="Chọn nền tảng gốc" />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-[0.5rem] border-muted-foreground/20 shadow-2xl z-[100]">
-                          <SelectItem value="openai" className="rounded-xl">OpenAI (GPT-4o, GPT-3.5)</SelectItem>
-                          <SelectItem value="anthropic" className="rounded-xl">Anthropic (Claude 3.5)</SelectItem>
-                          <SelectItem value="ollama" className="rounded-xl">Ollama (Llama 3, Qwen)</SelectItem>
-                          <SelectItem value="google" className="rounded-xl">Google (Gemini Pro)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-4">
-                      <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Phiên bản Mô hình</label>
-                      <Select
-                        value={formData.model_name}
-                        onValueChange={(val) => setFormData({ ...formData, model_name: val || "" })}
-                      >
-                        <SelectTrigger className="rounded-[0.5rem] h-12 border-muted-foreground/20 bg-background/50">
-                          <SelectValue placeholder="Lựa chọn Model" />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-[0.5rem] border-muted-foreground/20 shadow-2xl">
-                          {(PROVIDER_MODELS[formData.model_provider] || []).map((m) => (
-                            <SelectItem key={m.value} value={m.value} className="rounded-xl">
-                              {m.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-4 md:col-span-2">
-                      <div className="flex items-center justify-between ml-1">
-                        <label className="text-sm font-bold text-foreground/70">API Key</label>
-                      </div>
-                      <div className="relative group">
-                        <Input
-                          type={showApiKey ? "text" : "password"}
-                          value={formData.api_key}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            if (formData.api_key?.includes("****") && val.length < formData.api_key.length) {
-                              setFormData({ ...formData, api_key: "" });
-                            } else {
-                              setFormData({ ...formData, api_key: val });
-                            }
-                          }}
-                          placeholder="Nhập API Key của bạn..."
-                          className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50 pr-24 font-mono text-xs shadow-none"
-                        />
-                        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                          {formData.api_key !== initialKeys.api_key && initialKeys.api_key.includes("****") && (
-                            <button
-                              type="button"
-                              onClick={() => setFormData({ ...formData, api_key: initialKeys.api_key })}
-                              className="text-blue-500 hover:text-blue-600 transition-colors"
-                              title="Khôi phục Key cũ"
-                            >
-                              <RotateCcw className="w-4 h-4" />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => setShowApiKey(!showApiKey)}
-                            className="text-muted-foreground/40 hover:text-primary/60 transition-colors"
-                          >
-                            {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </section>
-
-              <section className="space-y-2 pt-4">
-                <div className="flex items-center gap-2 px-1">
-                  <h2 className="text-xl font-bold">Chọn Embedding Model</h2>
-                </div>
-
-                <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
-                  <CardContent className="px-8 py-2 grid grid-cols-1 md:grid-cols-2 gap-1">
-                    <div className="space-y-4">
-                      <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Bên cung cấp</label>
-                      <Select
-                        value={formData.embedding_provider}
-                        onValueChange={(val) => {
-                          if (val) {
-                            const defaultModel = EMBEDDING_MODELS[val]?.[0]?.value || "";
-                            setFormData({
-                              ...formData,
-                              embedding_provider: val,
-                              embedding_model: defaultModel
-                            });
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="rounded-[0.5rem] h-12 border-muted-foreground/20 bg-background/50">
-                          <SelectValue placeholder="Chọn nền tảng gốc" />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-[0.5rem] border-muted-foreground/20 shadow-2xl z-[100]">
-                          <SelectItem value="openai" className="rounded-xl">OpenAI Embeddings</SelectItem>
-                          <SelectItem value="google" className="rounded-xl">Google Gemini Embeddings</SelectItem>
-                          <SelectItem value="ollama" className="rounded-xl">Ollama Embeddings (Local)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-4">
-                      <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Phiên bản Mô hình Embedding</label>
-                      <Select
-                        value={formData.embedding_model}
-                        onValueChange={(val) => setFormData({ ...formData, embedding_model: val || "" })}
-                      >
-                        <SelectTrigger className="rounded-[0.5rem] h-12 border-muted-foreground/20 bg-background/50">
-                          <SelectValue placeholder="Lựa chọn Model" />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-[0.5rem] border-muted-foreground/20 shadow-2xl">
-                          {(EMBEDDING_MODELS[formData.embedding_provider] || []).map((m) => (
-                            <SelectItem key={m.value} value={m.value} className="rounded-xl">
-                              {m.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-4 md:col-span-2 pb-4">
-                      <div className="flex items-center justify-between ml-1">
-                        <label className="text-sm font-bold text-foreground/70">Embedding API Key</label>
-                      </div>
-                      <div className="relative group">
-                        <Input
-                          type={showEmbeddingApiKey ? "text" : "password"}
-                          value={formData.embedding_api_key}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            if (formData.embedding_api_key?.includes("****") && val.length < formData.embedding_api_key.length) {
-                              setFormData({ ...formData, embedding_api_key: "" });
-                            } else {
-                              setFormData({ ...formData, embedding_api_key: val });
-                            }
-                          }}
-                          placeholder="Nhập Embedding API Key..."
-                          className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50 pr-24 font-mono text-xs shadow-none"
-                        />
-                        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                          {formData.embedding_api_key !== initialKeys.embedding_api_key && initialKeys.embedding_api_key.includes("****") && (
-                            <button
-                              type="button"
-                              onClick={() => setFormData({ ...formData, embedding_api_key: initialKeys.embedding_api_key })}
-                              className="text-blue-500 hover:text-blue-600 transition-colors"
-                              title="Khôi phục Key cũ"
-                            >
-                              <RotateCcw className="w-4 h-4" />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => setShowEmbeddingApiKey(!showEmbeddingApiKey)}
-                            className="text-muted-foreground/40 hover:text-primary/60 transition-colors"
-                          >
-                            {showEmbeddingApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </section>
-            </TabsContent>
-
-            {/* --- Tab 2: Intelligence (Skill-based) --- */}
-            <TabsContent value="intelligence" className="space-y-4 animate-in fade-in duration-300 h-[550px] flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between px-1 shrink-0">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-bold">Kỹ Năng Chuyên Biệt</h2>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="rounded-full bg-blue-500/5 text-blue-600 border-blue-500/20 px-3 py-1 font-bold text-[9px] uppercase tracking-wider">
-                    {formData.skills.length} KỸ NĂNG ĐÃ CHỌN
-                  </Badge>
-                </div>
+          <div className="grid grid-cols-1 lg:grid-cols-[160px_1fr] gap-6 pt-4">
+            <div className="hidden lg:block">
+              <div className="sticky top-6 space-y-0.5 bg-white/40 dark:bg-zinc-950/20 p-2.5 rounded-2xl border backdrop-blur-xl ring-1 ring-white/10 shadow-sm">
+                <div className="px-3 py-1.5 text-[9px] font-black text-muted-foreground/50 uppercase tracking-widest border-b mb-1">Mục lục</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab("general");
+                    document.getElementById("sec-general")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left text-xs font-extrabold transition-all duration-200 relative overflow-hidden z-10",
+                    activeTab === "general" ? "text-primary font-black" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {activeTab === "general" && (
+                    <motion.div
+                      layoutId="active-toc-bg"
+                      className="absolute inset-0 bg-primary/10 dark:bg-primary/15 rounded-xl -z-10 border border-primary/10"
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                  {activeTab === "general" && (
+                    <motion.div 
+                      layoutId="active-toc-line" 
+                      className="absolute left-0 top-[25%] bottom-[25%] w-[3px] bg-primary rounded-r-full"
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                  <Settings className="w-4 h-4 shrink-0" />
+                  Cấu hình
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab("intelligence");
+                    document.getElementById("sec-intelligence")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left text-xs font-extrabold transition-all duration-200 relative overflow-hidden z-10",
+                    activeTab === "intelligence" ? "text-primary font-black" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {activeTab === "intelligence" && (
+                    <motion.div
+                      layoutId="active-toc-bg"
+                      className="absolute inset-0 bg-primary/10 dark:bg-primary/15 rounded-xl -z-10 border border-primary/10"
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                  {activeTab === "intelligence" && (
+                    <motion.div 
+                      layoutId="active-toc-line" 
+                      className="absolute left-0 top-[25%] bottom-[25%] w-[3px] bg-primary rounded-r-full"
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                  <Bot className="w-4 h-4 shrink-0" />
+                  Huấn luyện
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab("capabilities");
+                    document.getElementById("sec-capabilities")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left text-xs font-extrabold transition-all duration-200 relative overflow-hidden z-10",
+                    activeTab === "capabilities" ? "text-primary font-black" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {activeTab === "capabilities" && (
+                    <motion.div
+                      layoutId="active-toc-bg"
+                      className="absolute inset-0 bg-primary/10 dark:bg-primary/15 rounded-xl -z-10 border border-primary/10"
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                  {activeTab === "capabilities" && (
+                    <motion.div 
+                      layoutId="active-toc-line" 
+                      className="absolute left-0 top-[25%] bottom-[25%] w-[3px] bg-primary rounded-r-full"
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                  <Wrench className="w-4 h-4 shrink-0" />
+                  Công cụ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab("automation");
+                    document.getElementById("sec-automation")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left text-xs font-extrabold transition-all duration-200 relative overflow-hidden z-10",
+                    activeTab === "automation" ? "text-primary font-black" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {activeTab === "automation" && (
+                    <motion.div
+                      layoutId="active-toc-bg"
+                      className="absolute inset-0 bg-primary/10 dark:bg-primary/15 rounded-xl -z-10 border border-primary/10"
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                  {activeTab === "automation" && (
+                    <motion.div 
+                      layoutId="active-toc-line" 
+                      className="absolute left-0 top-[25%] bottom-[25%] w-[3px] bg-primary rounded-r-full"
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                  <Clock className="w-4 h-4 shrink-0" />
+                  Quy trình
+                </button>
               </div>
+            </div>
 
-              <div className={cn(
-                "flex-1 grid gap-6 min-h-0 transition-all duration-300",
-                (showPreview && previewWidth > 400) ? "grid-cols-1 overflow-y-auto custom-scrollbar pr-2" : "grid-cols-1 lg:grid-cols-[380px_1fr]"
-              )}>
-                {/* Left Side: Skill Library */}
-                <div className={cn(
-                  "flex flex-col min-h-0 transition-all duration-300",
-                  (showPreview && previewWidth > 400) && "min-h-[400px] h-[400px]"
-                )}>
-                  <Card className="rounded-[1rem] border shadow-xl bg-white/40 dark:bg-white/[0.02] backdrop-blur-2xl flex-1 flex flex-col overflow-hidden ring-1 ring-white/50 dark:ring-white/5">
-                    <CardHeader className="px-5 py-4 border-b bg-muted/20">
-                      <CardTitle className="text-[11px] font-bold text-foreground/60 uppercase tracking-widest">Thư viện Kỹ năng</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-0 flex-1 overflow-y-auto custom-scrollbar">
-                      {/* Templates Group */}
-                      <div className="p-2 space-y-1">
-                        <div className="flex items-center justify-between px-3 py-2">
-                          <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">Kỹ Năng Mẫu</p>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="w-5 h-5 rounded-md hover:bg-primary/10 hover:text-primary transition-colors"
-                              >
-                                <Plus className="w-3 h-3" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-64 rounded-xl shadow-2xl border-primary/10">
-                              <div className="px-2 py-1.5 text-[10px] font-bold text-muted-foreground/50 uppercase tracking-tight">Thư viện mẫu có sẵn</div>
-                              <DropdownMenuSeparator />
-                              {availableSkills.filter(s => s.is_template && !formData.skills.some(fs => fs.name === s.name)).length > 0 ? (
-                                availableSkills.filter(s => s.is_template && !formData.skills.some(fs => fs.name === s.name)).map(skill => (
-                                  <DropdownMenuItem
-                                    key={skill.id}
-                                    className="flex flex-col items-start gap-1 p-3 cursor-pointer group"
-                                    onClick={() => {
-                                      // Logic nạp tool tự động
-                                      let newTools = [...formData.tools];
-                                      if (skill.required_tools && Array.isArray(skill.required_tools)) {
-                                        skill.required_tools.forEach((toolName: string) => {
-                                          if (!newTools.some(t => t.name === toolName)) {
-                                            newTools.push({ name: toolName, is_active: true });
-                                          }
-                                        });
-                                      }
-                                      setFormData(prev => ({
-                                        ...prev,
-                                        skills: [...prev.skills, { name: skill.name, is_active: true }],
-                                        tools: newTools
-                                      }));
-                                      addNotification("success", "Đã thêm", `Đã thêm kỹ năng ${skill.name}`);
-                                      if (!previewSkill) setPreviewSkill(skill);
-                                    }}
-                                  >
-                                    <div className="flex items-center gap-2 w-full">
-                                      <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center text-primary">
-                                        <Zap className="w-3 h-3" />
-                                      </div>
-                                      <span className="font-bold text-[12px] group-hover:text-primary transition-colors">{skill.name}</span>
-                                    </div>
-                                    <p className="text-[10px] text-muted-foreground line-clamp-1 pl-8 italic">{skill.description}</p>
-                                  </DropdownMenuItem>
-                                ))
-                              ) : (
-                                <div className="p-4 text-center text-[11px] text-muted-foreground italic">Đã thêm tất cả các mẫu</div>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+            <div className="space-y-12 max-w-[800px] w-full">
+              <div id="sec-general" className="space-y-6 animate-in fade-in duration-200">
+                <section className="space-y-2">
+                  <div className="flex items-center gap-2 px-1">
+                    <h2 className="text-xl font-bold">Chi tiết trợ lý</h2>
+                  </div>
+                  <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
+                    <CardContent className="px-8 py-2 space-y-5">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="space-y-4">
+                          <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Tên Agent</label>
+                          <Input
+                            placeholder="Nhập tên cho Agent..."
+                            className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50"
+                            value={formData.name}
+                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                          />
                         </div>
-
-                        {/* Only show added templates */}
-                        {availableSkills.filter(s => s.is_template && formData.skills.some(fs => fs.name === s.name)).map(skill => {
-                          const isActive = formData.skills.some(s => s.name === skill.name);
-                          return (
-                            <div
-                              key={skill.id}
-                              className={cn(
-                                "flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all group relative",
-                                previewSkill?.id === skill.id ? "bg-primary/10 border-primary/20 border shadow-sm" : "hover:bg-muted/50 border border-transparent"
-                              )}
-                              onClick={() => setPreviewSkill(skill)}
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border transition-all", isActive ? "bg-primary text-white border-primary shadow-lg shadow-primary/20" : "bg-muted text-muted-foreground")}>
-                                  <Zap className="w-4 h-4" />
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="text-[13px] font-bold truncate">{skill.name}</p>
-                                  <div className="flex items-center gap-1">
-                                    <Badge className="bg-primary/5 text-primary border-none text-[8px] h-3 px-1 uppercase font-black">Hệ thống</Badge>
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 rounded-md hover:bg-destructive/10 text-muted-foreground/40 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
-                                  title="Gỡ bỏ khỏi Agent"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setFormData(prev => ({ ...prev, skills: prev.skills.filter(s => s.name !== skill.name) }));
-                                    addNotification("info", "Đã gỡ", `Đã gỡ kỹ năng ${skill.name}`);
-                                  }}
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </Button>
-                                <div className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(var(--primary),0.5)]" />
-                              </div>
+                        <div className="space-y-4">
+                          <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Chuyên môn nghiệp vụ</label>
+                          <div className="flex gap-2 items-center">
+                            <div className={cn("transition-all duration-500", isOtherSpecialty ? "w-[160px]" : "w-full")}>
+                              <Select
+                                value={isOtherSpecialty ? "other" : formData.specialty}
+                                onValueChange={(val) => {
+                                  if (val === "other") {
+                                    setIsOtherSpecialty(true);
+                                    setFormData({ ...formData, specialty: "" });
+                                  } else {
+                                    setIsOtherSpecialty(false);
+                                    setFormData({ ...formData, specialty: val || "" });
+                                  }
+                                }}
+                              >
+                                <SelectTrigger className="rounded-[0.5rem] h-12 border-muted-foreground/20 bg-background/50 focus:ring-primary/20">
+                                  <SelectValue placeholder="Chọn lĩnh vực">
+                                    {isOtherSpecialty ? "Khác..." : undefined}
+                                  </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent className="rounded-[0.5rem] border-muted-foreground/20 shadow-2xl">
+                                  <SelectItem value="Chăm sóc khách hàng" className="rounded-xl">Chăm sóc khách hàng</SelectItem>
+                                  <SelectItem value="Tư vấn Bán hàng" className="rounded-xl">Tư vấn Bán hàng</SelectItem>
+                                  <SelectItem value="Phân tích & Nghiên cứu" className="rounded-xl">Phân tích & Nghiên cứu</SelectItem>
+                                  <SelectItem value="Sáng tạo Nội dung" className="rounded-xl">Sáng tạo Nội dung</SelectItem>
+                                  <SelectItem value="Lập trình & Kỹ thuật" className="rounded-xl">Lập trình & Kỹ thuật</SelectItem>
+                                  <SelectItem value="Pháp lý & Luật" className="rounded-xl">Pháp lý & Luật</SelectItem>
+                                  <SelectItem value="Tài chính & Kế toán" className="rounded-xl">Tài chính & Kế toán</SelectItem>
+                                  <SelectItem value="Nhân sự & Tuyển dụng" className="rounded-xl">Nhân sự & Tuyển dụng</SelectItem>
+                                  <SelectItem value="Giáo dục & Đào tạo" className="rounded-xl">Giáo dục & Đào tạo</SelectItem>
+                                  <SelectItem value="Dịch thuật & Ngôn ngữ" className="rounded-xl">Dịch thuật & Ngôn ngữ</SelectItem>
+                                  <SelectItem value="other" className="rounded-xl font-bold text-primary">Khác...</SelectItem>
+                                </SelectContent>
+                              </Select>
                             </div>
-                          );
-                        })}
-                        {availableSkills.filter(s => s.is_template && formData.skills.some(fs => fs.name === s.name)).length === 0 && (
-                          <div className="px-3 py-6 text-center text-[10px] text-muted-foreground italic opacity-50">Chưa chọn mẫu hệ thống nào.</div>
-                        )}
-                      </div>
-
-                      {/* Custom Group */}
-                      <div className="p-2 space-y-1 border-t">
-                        <div className="flex items-center justify-between px-3 py-2">
-                          <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">Tùy chỉnh</p>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="w-5 h-5 rounded-md hover:bg-primary/10 hover:text-primary transition-colors"
-                            onClick={() => setIsCreateSkillOpen(true)}
-                          >
-                            <Plus className="w-3 h-3" />
-                          </Button>
-                        </div>
-                        {availableSkills.filter(s => !s.is_template).length > 0 ? (
-                          availableSkills.filter(s => !s.is_template).map((skill, index) => {
-                            const isActive = formData.skills.some(s => s.name === skill.name);
-                            return (
-                              <div
-                                key={skill.id || `custom-skill-${index}`}
-                                className={cn(
-                                  "flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all group relative",
-                                  previewSkill?.id === skill.id ? "bg-amber-500/10 border-amber-500/20 border shadow-sm" : "hover:bg-muted/50 border border-transparent"
-                                )}
-                                onClick={() => setPreviewSkill(skill)}
-                              >
-                                <div className="flex items-center gap-3 min-w-0">
-                                  <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border transition-all", isActive ? "bg-amber-500 text-white border-amber-500 shadow-lg shadow-amber-500/20" : "bg-muted text-muted-foreground")}>
-                                    <Sparkles className="w-4 h-4" />
-                                  </div>
-                                  <div className="min-w-0">
-                                    <p className="text-[13px] font-bold truncate">{skill.name}</p>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <div className="flex items-center gap-1 transition-all opacity-0 group-hover:opacity-100">
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="w-7 h-7 rounded-md hover:bg-amber-500/10 text-muted-foreground/40 hover:text-amber-600 transition-all"
-                                      title="Chỉnh sửa kỹ năng"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setEditingSkillId(skill.id);
-                                        setNewSkill({ name: skill.name, description: skill.description || "", content: skill.content });
-                                        setIsCreateSkillOpen(true);
-                                      }}
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="w-7 h-7 rounded-md hover:bg-destructive/10 text-muted-foreground/40 hover:text-destructive transition-all"
-                                      title="Xóa kỹ năng"
-                                      onClick={async (e) => {
-                                        e.stopPropagation();
-                                        if (confirm(`Bạn có chắc chắn muốn xóa kỹ năng "${skill.name}"?`)) {
-                                          try {
-                                            const res = await fetchWithAuth(`/skills/${skill.id}`, { method: "DELETE" });
-                                            if (res.ok) {
-                                              addNotification("success", "Thành công", "Đã xóa kỹ năng");
-                                              setAvailableSkills(prev => prev.filter(s => s.id !== skill.id));
-                                              if (previewSkill?.id === skill.id) setPreviewSkill(null);
-                                              setFormData(prev => ({ ...prev, skills: prev.skills.filter(s => s.name !== skill.name) }));
-                                            }
-                                          } catch (err) {
-                                            addNotification("error", "Lỗi", "Không thể xóa kỹ năng");
-                                          }
-                                        }
-                                      }}
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </Button>
-                                  </div>
-                                  <input
-                                    type="checkbox"
-                                    checked={isActive}
-                                    className="w-4 h-4 rounded border-muted-foreground/30 text-amber-500 focus:ring-amber-500/20"
-                                    onChange={(e) => {
-                                      e.stopPropagation();
-                                      if (e.target.checked) {
-                                        setFormData(prev => ({ ...prev, skills: [...prev.skills, { name: skill.name, is_active: true }] }));
-                                      } else {
-                                        setFormData(prev => ({ ...prev, skills: prev.skills.filter(s => s.name !== skill.name) }));
-                                      }
-                                    }}
-                                  />
-                                </div>
+                            {isOtherSpecialty && (
+                              <div className="flex-1 animate-in fade-in zoom-in-95 slide-in-from-left-4 duration-500">
+                                <Input
+                                  placeholder="Mô tả chuyên môn cụ thể..."
+                                  className="rounded-[0.5rem] h-12 border-primary/20 bg-primary/[0.02] focus:ring-primary/20 border-dashed"
+                                  value={formData.specialty}
+                                  onChange={(e) => setFormData({ ...formData, specialty: e.target.value })}
+                                />
                               </div>
-                            );
-                          })
-                        ) : (
-                          <div className="px-3 py-8 text-center text-[11px] text-muted-foreground italic">Chưa có kỹ năng tùy chỉnh</div>
-                        )}
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Mô tả nhiệm vụ & Vai trò</label>
+                        <Textarea
+                          placeholder="Mô tả cụ thể trách nhiệm mà Agent này sẽ đảm nhận trong quy trình của bạn..."
+                          className="rounded-[0.5rem] min-h-[100px] resize-none border-muted-foreground/20 bg-background/50"
+                          value={formData.description}
+                          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                        />
                       </div>
                     </CardContent>
                   </Card>
-                </div>
+                </section>
 
-                {/* Right Side: Markdown Preview */}
-                <div className={cn(
-                  "flex-1 flex flex-col min-w-0 transition-all duration-300",
-                  (showPreview && previewWidth > 400) && "min-h-[600px] mt-2"
-                )}>
-                  <Card className="rounded-[1rem] flex-1 border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl flex flex-col overflow-hidden">
-                    {previewSkill ? (
-                      <>
-                        <CardHeader className="px-8 py-6 border-b bg-muted/5 shrink-0 relative">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="absolute right-4 top-4 w-8 h-8 rounded-full hover:bg-destructive/10 hover:text-destructive transition-all"
-                            onClick={() => setPreviewSkill(null)}
-                          >
-                            <X className="w-4 h-4" />
-                          </Button>
-                          <div className="space-y-2 flex-1 min-w-0 pr-8">
-                            <div className="flex items-center gap-3">
-                              <h3 className="text-2xl font-black tracking-tight truncate">{previewSkill.name}</h3>
-                              {previewSkill.is_template ? (
-                                <Badge className="bg-blue-500/10 text-blue-600 border-none font-bold text-[9px] h-4 px-2">TEMPLATE</Badge>
-                              ) : (
-                                <Badge className="bg-amber-500/10 text-amber-600 border-none font-bold text-[9px] h-4 px-2">CUSTOM</Badge>
-                              )}
-                            </div>
-                            <p className="text-[13px] text-muted-foreground leading-relaxed font-medium line-clamp-2">{previewSkill.description || "Nội dung chỉ dẫn thực thi kỹ năng."}</p>
-                          </div>
-
-                          {/* Apply Skill Button (Removed as per user request, selection is now via Plus picker) */}
-                          <div className="shrink-0 flex flex-col items-end gap-2">
-                            {previewSkill.required_tools && previewSkill.required_tools.length > 0 && (
-                              <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-tight italic opacity-60">
-                                Yêu cầu: {previewSkill.required_tools.join(", ")}
-                              </p>
-                            )}
-                          </div>
-                        </CardHeader>
-                        <CardContent className="p-8 flex-1 overflow-y-auto custom-scrollbar bg-background/30 min-h-0">
-                          <div className="markdown-preview max-w-none">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {previewSkill.content}
-                            </ReactMarkdown>
-                          </div>
-                        </CardContent>
-                      </>
-                    ) : (
-                      <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-4">
-                        <div className="w-16 h-16 rounded-2xl bg-muted/20 flex items-center justify-center text-muted-foreground/30">
-                          <Eye className="w-8 h-8" />
+                <section className="space-y-2 pt-4">
+                  <div className="flex items-center gap-2 px-1">
+                    <h2 className="text-xl font-bold">Chọn Model LLM</h2>
+                  </div>
+                  <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
+                    <CardContent className="px-8 py-2 grid grid-cols-1 md:grid-cols-2 gap-1">
+                      <div className="space-y-4">
+                        <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Bên cung cấp</label>
+                        <Select
+                          value={formData.model_provider}
+                          onValueChange={(val) => {
+                            if (val) {
+                              const defaultModel = PROVIDER_MODELS[val]?.[0]?.value || "";
+                              setFormData({
+                                ...formData,
+                                model_provider: val,
+                                model_name: defaultModel,
+                              });
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="rounded-[0.5rem] h-12 border-muted-foreground/20 bg-background/50">
+                            <SelectValue placeholder="Chọn nền tảng gốc" />
+                          </SelectTrigger>
+                          <SelectContent className="rounded-[0.5rem] border-muted-foreground/20 shadow-2xl z-[100]">
+                            <SelectItem value="openai" className="rounded-xl">OpenAI (GPT-4o, GPT-3.5)</SelectItem>
+                            <SelectItem value="anthropic" className="rounded-xl">Anthropic (Claude 3.5)</SelectItem>
+                            <SelectItem value="ollama" className="rounded-xl">Ollama (Llama 3, Qwen)</SelectItem>
+                            <SelectItem value="google" className="rounded-xl">Google (Gemini Pro)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-4">
+                        <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Phiên bản Mô hình</label>
+                        <Select
+                          value={formData.model_name}
+                          onValueChange={(val) => setFormData({ ...formData, model_name: val || "" })}
+                        >
+                          <SelectTrigger className="rounded-[0.5rem] h-12 border-muted-foreground/20 bg-background/50">
+                            <SelectValue placeholder="Lựa chọn Model" />
+                          </SelectTrigger>
+                          <SelectContent className="rounded-[0.5rem] border-muted-foreground/20 shadow-2xl">
+                            {(PROVIDER_MODELS[formData.model_provider] || []).map((m) => (
+                              <SelectItem key={m.value} value={m.value} className="rounded-xl">
+                                {m.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-4 md:col-span-2">
+                        <div className="flex items-center justify-between ml-1">
+                          <label className="text-sm font-bold text-foreground/70">API Key</label>
                         </div>
-                        <div>
-                          <h3 className="font-bold text-foreground/60">Xem trước Kỹ năng</h3>
-                          <p className="text-[13px] text-muted-foreground max-w-xs mt-1">Chọn một kỹ năng từ danh sách bên trái để xem nội dung chỉ dẫn Markdown chi tiết.</p>
+                        <div className="relative group">
+                          <Input
+                            type={showApiKey ? "text" : "password"}
+                            value={formData.api_key}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (formData.api_key?.includes("****") && val.length < formData.api_key.length) {
+                                setFormData({ ...formData, api_key: "" });
+                              } else {
+                                setFormData({ ...formData, api_key: val });
+                              }
+                            }}
+                            placeholder="Nhập API Key của bạn..."
+                            className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50 pr-24 font-mono text-xs shadow-none"
+                          />
+                          <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                            {formData.api_key !== initialKeys.api_key && initialKeys.api_key.includes("****") && (
+                              <button
+                                type="button"
+                                onClick={() => setFormData({ ...formData, api_key: initialKeys.api_key })}
+                                className="text-blue-500 hover:text-blue-600 transition-colors"
+                                title="Khôi phục Key cũ"
+                              >
+                                <RotateCcw className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setShowApiKey(!showApiKey)}
+                              className="text-muted-foreground/40 hover:text-primary/60 transition-colors"
+                            >
+                              {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    )}
+                    </CardContent>
                   </Card>
-                </div>
+                </section>
+
+                <section className="space-y-2 pt-4">
+                  <div className="flex items-center gap-2 px-1">
+                    <h2 className="text-xl font-bold">Chọn Embedding Model</h2>
+                  </div>
+                  <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
+                    <CardContent className="px-8 py-2 grid grid-cols-1 md:grid-cols-2 gap-1">
+                      <div className="space-y-4">
+                        <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Bên cung cấp</label>
+                        <Select
+                          value={formData.embedding_provider}
+                          onValueChange={(val) => {
+                            if (val) {
+                              const defaultModel = EMBEDDING_MODELS[val]?.[0]?.value || "";
+                              setFormData({
+                                ...formData,
+                                embedding_provider: val,
+                                embedding_model: defaultModel
+                              });
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="rounded-[0.5rem] h-12 border-muted-foreground/20 bg-background/50">
+                            <SelectValue placeholder="Chọn nền tảng gốc" />
+                          </SelectTrigger>
+                          <SelectContent className="rounded-[0.5rem] border-muted-foreground/20 shadow-2xl z-[100]">
+                            <SelectItem value="openai" className="rounded-xl">OpenAI Embeddings</SelectItem>
+                            <SelectItem value="google" className="rounded-xl">Google Gemini Embeddings</SelectItem>
+                            <SelectItem value="ollama" className="rounded-xl">Ollama Embeddings (Local)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-4">
+                        <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Phiên bản Mô hình Embedding</label>
+                        <Select
+                          value={formData.embedding_model}
+                          onValueChange={(val) => setFormData({ ...formData, embedding_model: val || "" })}
+                        >
+                          <SelectTrigger className="rounded-[0.5rem] h-12 border-muted-foreground/20 bg-background/50">
+                            <SelectValue placeholder="Lựa chọn Model" />
+                          </SelectTrigger>
+                          <SelectContent className="rounded-[0.5rem] border-muted-foreground/20 shadow-2xl">
+                            {(EMBEDDING_MODELS[formData.embedding_provider] || []).map((m) => (
+                              <SelectItem key={m.value} value={m.value} className="rounded-xl">
+                                {m.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-4 md:col-span-2 pb-4">
+                        <div className="flex items-center justify-between ml-1">
+                          <label className="text-sm font-bold text-foreground/70">Embedding API Key</label>
+                        </div>
+                        <div className="relative group">
+                          <Input
+                            type={showEmbeddingApiKey ? "text" : "password"}
+                            value={formData.embedding_api_key}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (formData.embedding_api_key?.includes("****") && val.length < formData.embedding_api_key.length) {
+                                setFormData({ ...formData, embedding_api_key: "" });
+                              } else {
+                                setFormData({ ...formData, embedding_api_key: val });
+                              }
+                            }}
+                            placeholder="Nhập Embedding API Key..."
+                            className="rounded-[0.5rem] h-12 border-muted-foreground/20 focus:ring-primary/20 transition-all bg-background/50 pr-24 font-mono text-xs shadow-none"
+                          />
+                          <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                            {formData.embedding_api_key !== initialKeys.embedding_api_key && initialKeys.embedding_api_key.includes("****") && (
+                              <button
+                                type="button"
+                                onClick={() => setFormData({ ...formData, embedding_api_key: initialKeys.embedding_api_key })}
+                                className="text-blue-500 hover:text-blue-600 transition-colors"
+                                title="Khôi phục Key cũ"
+                              >
+                                <RotateCcw className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setShowEmbeddingApiKey(!showEmbeddingApiKey)}
+                              className="text-muted-foreground/40 hover:text-primary/60 transition-colors"
+                            >
+                              {showEmbeddingApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </section>
               </div>
 
-              <section className="space-y-4 pt-4">
-                <div className="flex items-center gap-2 px-1">
-                  <h2 className="text-xl font-bold">Cơ sở Tri thức</h2>
+              <div id="sec-intelligence" className="space-y-6 animate-in fade-in duration-300 flex flex-col border-t pt-8 scroll-mt-6">
+                <div className="flex items-center justify-between px-1 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-bold">Kỹ Năng Chuyên Biệt</h2>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="rounded-full bg-blue-500/5 text-blue-600 border-blue-500/20 px-3 py-1 font-bold text-[9px] uppercase tracking-wider">
+                      {formData.skills.length} KỸ NĂNG ĐÃ CHỌN
+                    </Badge>
+                  </div>
                 </div>
-                <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
-                  <CardContent className="px-8 py-6 space-y-6">
-                    <div className="relative border-2 border-dashed border-muted-foreground/20 rounded-[0.5rem] p-10 flex flex-col items-center justify-center bg-muted/5 hover:bg-primary/5 hover:border-primary/30 transition-all cursor-pointer group overflow-hidden">
-                      <input
-                        type="file"
-                        className="absolute inset-0 opacity-0 cursor-pointer z-20"
-                        onChange={handleFileUpload}
-                        disabled={isUploading}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                      <div className="w-14 h-14 rounded-[0.5rem] bg-primary/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform relative z-10">
-                        <Plus className={cn("w-7 h-7 text-primary", isUploading && "animate-spin")} />
-                      </div>
-                      <h3 className="text-base font-bold relative z-10">{isUploading ? "Đang tải lên..." : "Tải lên tài liệu huấn luyện"}</h3>
-                      <p className="text-xs text-muted-foreground text-center mt-2 max-w-sm relative z-10 leading-relaxed">Nhấn hoặc kéo thả tệp tài liệu chuyên sâu tại đây.</p>
-                    </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {formData.knowledge_files.map((file, idx) => (
-                        <div key={idx} className={cn(
-                          "p-4 border rounded-[0.5rem] bg-background/50 flex items-center justify-between group transition-all hover:shadow-md",
-                          file.status === "indexing" ? "border-primary/30 bg-primary/5 animate-pulse" :
-                            file.status === "error" ? "border-destructive/30 bg-destructive/5" : "hover:border-primary/30"
-                        )}>
-                          <div className="flex items-center gap-4 flex-1 min-w-0">
-                            <div className={cn(
-                              "w-10 h-10 rounded-[0.5rem] flex items-center justify-center shrink-0 border",
-                              file.status === "indexing" ? "bg-primary/20 text-primary border-primary/20" :
-                                file.status === "error" ? "bg-destructive/20 text-destructive border-destructive/20" :
-                                  "bg-red-500/10 text-red-500 border-red-500/10"
-                            )}>
-                              {file.status === "indexing" ? (
-                                <Sparkles className="w-5 h-5 animate-spin" />
-                              ) : (
-                                <span className="text-[10px] font-bold uppercase">{file.filename.split('.').pop()}</span>
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0 pr-2">
-                              <p className="text-xs font-bold truncate text-foreground/90">{file.filename}</p>
-                              <div className="flex items-center gap-1.5 mt-0.5">
-                                {file.status === "indexing" ? (
-                                  <>
-                                    <div className="w-1 h-1 rounded-full bg-primary animate-pulse" />
-                                    <p className="text-[9px] text-primary font-bold uppercase tracking-tight">Đang trích xuất tri thức...</p>
-                                  </>
-                                ) : file.status === "error" ? (
-                                  <>
-                                    <div className="w-1 h-1 rounded-full bg-destructive" />
-                                    <p className="text-[9px] text-destructive font-bold uppercase tracking-tight">Lỗi Indexing</p>
-                                  </>
+                <div className={cn(
+                  "flex-1 grid gap-6 min-h-0 transition-all duration-300",
+                  (showPreview && previewWidth > 400) ? "grid-cols-1 overflow-y-auto custom-scrollbar pr-2" : "grid-cols-1 lg:grid-cols-[380px_1fr]"
+                )}>
+                  <div className={cn(
+                    "flex flex-col min-h-0 transition-all duration-300",
+                    (showPreview && previewWidth > 400) && "min-h-[400px] h-[400px]"
+                  )}>
+                    <Card className="rounded-[1rem] border shadow-xl bg-white/40 dark:bg-white/[0.02] backdrop-blur-2xl flex-1 flex flex-col overflow-hidden ring-1 ring-white/50 dark:ring-white/5">
+                      <CardHeader className="px-5 py-4 border-b bg-muted/20">
+                        <CardTitle className="text-[11px] font-bold text-foreground/60 uppercase tracking-widest">Thư viện Kỹ năng</CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-0 flex-1 overflow-y-auto custom-scrollbar">
+                        <div className="p-2 space-y-1">
+                          <div className="flex items-center justify-between px-3 py-2">
+                            <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">Kỹ Năng Mẫu</p>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="w-5 h-5 rounded-md hover:bg-primary/10 hover:text-primary transition-colors"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-64 rounded-xl shadow-2xl border-primary/10">
+                                <div className="px-2 py-1.5 text-[10px] font-bold text-muted-foreground/50 uppercase tracking-tight">Thư viện mẫu có sẵn</div>
+                                <DropdownMenuSeparator />
+                                {availableSkills.filter(s => s.is_template && !formData.skills.some(fs => fs.name === s.name)).length > 0 ? (
+                                  availableSkills.filter(s => s.is_template && !formData.skills.some(fs => fs.name === s.name)).map(skill => (
+                                    <DropdownMenuItem
+                                      key={skill.id}
+                                      className="flex flex-col items-start gap-1 p-3 cursor-pointer group"
+                                      onClick={() => {
+                                        const newTools = [...formData.tools];
+                                        if (skill.required_tools && Array.isArray(skill.required_tools)) {
+                                          skill.required_tools.forEach((toolName: string) => {
+                                            if (!newTools.some(t => t.name === toolName)) {
+                                              newTools.push({ name: toolName, is_active: true });
+                                            }
+                                          });
+                                        }
+                                        setFormData(prev => ({
+                                          ...prev,
+                                          skills: [...prev.skills, { name: skill.name, is_active: true }],
+                                          tools: newTools
+                                        }));
+                                        addNotification("success", "Đã thêm", `Đã thêm kỹ năng ${skill.name}`);
+                                        if (!previewSkill) setPreviewSkill(skill);
+                                      }}
+                                    >
+                                      <div className="flex items-center gap-2 w-full">
+                                        <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center text-primary">
+                                          <Zap className="w-3 h-3" />
+                                        </div>
+                                        <span className="font-bold text-[12px] group-hover:text-primary transition-colors">{skill.name}</span>
+                                      </div>
+                                      <p className="text-[10px] text-muted-foreground line-clamp-1 pl-8 italic">{skill.description}</p>
+                                    </DropdownMenuItem>
+                                  ))
                                 ) : (
-                                  <>
-                                    <div className="w-1 h-1 rounded-full bg-emerald-500" />
-                                    <p className="text-[9px] text-muted-foreground font-medium">Sẵn sàng huấn luyện</p>
-                                  </>
+                                  <div className="p-4 text-center text-[11px] text-muted-foreground italic">Đã thêm tất cả các mẫu</div>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                          {availableSkills.filter(s => s.is_template && formData.skills.some(fs => fs.name === s.name)).map(skill => {
+                            const isActive = formData.skills.some(s => s.name === skill.name);
+                            return (
+                              <div
+                                key={skill.id}
+                                className={cn(
+                                  "flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all duration-300 group relative overflow-hidden",
+                                  previewSkill?.id === skill.id ? "bg-primary/[0.08] dark:bg-primary/[0.04] border-primary/30 border shadow-md scale-[1.01] ring-1 ring-primary/10" : "hover:bg-muted/40 hover:-translate-y-0.5 hover:shadow border border-transparent"
+                                )}
+                                onClick={() => setPreviewSkill(skill)}
+                              >
+                                <div className="flex items-center gap-3 min-w-0 z-10">
+                                  <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border transition-all duration-300", isActive ? "bg-primary text-white border-primary shadow-lg shadow-primary/20 scale-105" : "bg-muted text-muted-foreground")}>
+                                    <Zap className="w-4 h-4" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-[13px] font-bold truncate group-hover:text-primary transition-colors">{skill.name}</p>
+                                    <div className="flex items-center gap-1">
+                                      <Badge className="bg-primary/5 text-primary border-none text-[8px] h-3 px-1 uppercase font-black">Hệ thống</Badge>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 z-10">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 rounded-md hover:bg-destructive/10 text-muted-foreground/40 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
+                                    title="Gỡ bỏ khỏi Agent"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setFormData(prev => ({ ...prev, skills: prev.skills.filter(s => s.name !== skill.name) }));
+                                      addNotification("info", "Đã gỡ", `Đã gỡ kỹ năng ${skill.name}`);
+                                    }}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <div className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(22,163,74,0.6)]" />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="p-2 space-y-1 border-t">
+                          <div className="flex items-center justify-between px-3 py-2">
+                            <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">Tùy chỉnh</p>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="w-5 h-5 rounded-md hover:bg-primary/10 hover:text-primary transition-colors"
+                              onClick={() => setIsCreateSkillOpen(true)}
+                            >
+                              <Plus className="w-3 h-3" />
+                            </Button>
+                          </div>
+                          {availableSkills.filter(s => !s.is_template).length > 0 ? (
+                            availableSkills.filter(s => !s.is_template).map((skill, index) => {
+                              const isActive = formData.skills.some(s => s.name === skill.name);
+                              return (
+                                <div
+                                  key={skill.id || `custom-skill-${index}`}
+                                  className={cn(
+                                    "flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all duration-300 group relative overflow-hidden",
+                                    previewSkill?.id === skill.id ? "bg-amber-500/[0.08] dark:bg-amber-500/[0.04] border-amber-500/30 border shadow-md scale-[1.01] ring-1 ring-amber-500/10" : "hover:bg-muted/40 hover:-translate-y-0.5 hover:shadow border border-transparent"
+                                  )}
+                                  onClick={() => setPreviewSkill(skill)}
+                                >
+                                  <div className="flex items-center gap-3 min-w-0 z-10">
+                                    <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border transition-all duration-300", isActive ? "bg-amber-500 text-white border-amber-500 shadow-lg shadow-amber-500/20 scale-105" : "bg-muted text-muted-foreground")}>
+                                      <Sparkles className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-[13px] font-bold truncate group-hover:text-amber-600 transition-colors">{skill.name}</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 z-10">
+                                    <div className="flex items-center gap-1 transition-all duration-250 opacity-0 group-hover:opacity-100">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="w-7 h-7 rounded-md hover:bg-amber-500/10 text-muted-foreground/40 hover:text-amber-600 transition-all"
+                                        title="Chỉnh sửa kỹ năng"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingSkillId(skill.id);
+                                          setNewSkill({ name: skill.name, description: skill.description || "", content: skill.content });
+                                          setIsCreateSkillOpen(true);
+                                        }}
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="w-7 h-7 rounded-md hover:bg-destructive/10 text-muted-foreground/40 hover:text-destructive transition-all"
+                                        title="Xóa kỹ năng"
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          if (confirm(`Bạn có chắc chắn muốn xóa kỹ năng "${skill.name}"?`)) {
+                                            try {
+                                              const res = await fetchWithAuth(`/skills/${skill.id}`, { method: "DELETE" });
+                                              if (res.ok) {
+                                                addNotification("success", "Thành công", "Đã xóa kỹ năng");
+                                                setAvailableSkills(prev => prev.filter(s => s.id !== skill.id));
+                                                if (previewSkill?.id === skill.id) setPreviewSkill(null);
+                                                setFormData(prev => ({ ...prev, skills: prev.skills.filter(s => s.name !== skill.name) }));
+                                              }
+                                            } catch (err) {
+                                              addNotification("error", "Lỗi", "Không thể xóa kỹ năng");
+                                            }
+                                          }
+                                        }}
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </Button>
+                                    </div>
+                                    <input
+                                      type="checkbox"
+                                      checked={isActive}
+                                      className="w-4 h-4 rounded border-muted-foreground/30 text-amber-500 focus:ring-amber-500/20"
+                                      onChange={(e) => {
+                                        e.stopPropagation();
+                                        if (e.target.checked) {
+                                          setFormData(prev => ({ ...prev, skills: [...prev.skills, { name: skill.name, is_active: true }] }));
+                                        } else {
+                                          setFormData(prev => ({ ...prev, skills: prev.skills.filter(s => s.name !== skill.name) }));
+                                        }
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="px-3 py-8 text-center text-[11px] text-muted-foreground italic">Chưa có kỹ năng tùy chỉnh</div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                  <div className={cn(
+                    "flex-1 flex flex-col min-w-0 transition-all duration-300",
+                    (showPreview && previewWidth > 400) && "min-h-[600px] mt-2"
+                  )}>
+                    <Card className="rounded-[1.5rem] flex-1 border border-primary/15 shadow-xl bg-white/60 dark:bg-zinc-950/40 backdrop-blur-2xl flex flex-col overflow-hidden relative ring-1 ring-white/10 dark:ring-white/5">
+                      <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(22,163,74,0.012)_1px,transparent_1px),linear-gradient(to_bottom,rgba(22,163,74,0.012)_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none -z-10 dark:bg-[linear-gradient(to_right,rgba(22,163,74,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(22,163,74,0.02)_1px,transparent_1px)]" />
+                      <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-primary/5 rounded-full blur-[80px] pointer-events-none -z-10 dark:bg-primary/10" />
+
+                      {previewSkill ? (
+                        <>
+                          <div className="flex items-center justify-between px-6 py-2 border-b border-muted-foreground/10 bg-black/[0.02] dark:bg-white/[0.01] text-[9px] font-mono tracking-widest text-muted-foreground/70 shrink-0 select-none">
+                            <div className="flex items-center gap-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shadow-[0_0_8px_rgba(22,163,74,0.8)]" />
+                              <span>SYSTEM_DIRECTIVE_COMPILER: ACTIVE</span>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <span>LINES: <span className="text-foreground font-black">{(previewSkill.content as string).split('\n').length}</span></span>
+                              <span>BYTES: <span className="text-foreground font-black">{(previewSkill.content as string).length}</span></span>
+                            </div>
+                          </div>
+
+                          <CardHeader className="px-8 py-5 border-b bg-muted/5 shrink-0 relative">
+                            <div className="absolute right-4 top-4 flex items-center gap-1.5">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="w-8 h-8 rounded-full hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all duration-200"
+                                title="Sao chép chỉ dẫn"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(previewSkill.content as string);
+                                  addNotification("success", "Sao chép thành công", "Đã sao chép nội dung kỹ năng vào clipboard");
+                                }}
+                              >
+                                <Copy className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="w-8 h-8 rounded-full hover:bg-destructive/10 text-muted-foreground/70 hover:text-destructive transition-all duration-200"
+                                onClick={() => setPreviewSkill(null)}
+                              >
+                                <X className="w-4 h-4" />
+                              </Button>
+                            </div>
+                            <div className="space-y-2 flex-1 min-w-0 pr-16">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-inner">
+                                  <Terminal className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <h3 className="text-xl font-black tracking-tight truncate text-foreground">{previewSkill.name as string}</h3>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    {(previewSkill.is_template as boolean) ? (
+                                      <Badge className="bg-primary/10 text-primary border-none font-extrabold text-[8px] h-4 px-1.5">HỆ THỐNG</Badge>
+                                    ) : (
+                                      <Badge className="bg-amber-500/10 text-amber-600 border-none font-extrabold text-[8px] h-4 px-1.5">TÙY CHỈNH</Badge>
+                                    )}
+                                    <span className="text-[10px] text-muted-foreground/60 font-mono">ID: {previewSkill.id}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <p className="text-[13px] text-muted-foreground leading-relaxed font-medium mt-2">{(previewSkill.description as string) || "Nội dung chỉ dẫn thực thi kỹ năng."}</p>
+                            </div>
+                          </CardHeader>
+                          
+                          <CardContent className="p-8 flex-1 overflow-y-auto custom-scrollbar bg-background/20 dark:bg-black/10 min-h-0 relative">
+                            <div className="absolute top-2 left-2 right-2 text-[9px] font-mono text-muted-foreground/20 pointer-events-none select-none flex justify-between">
+                              <span>[COMPILER_OUTPUT]</span>
+                              <span>[EOF]</span>
+                            </div>
+                            <div className="markdown-preview max-w-none pt-4 pb-8 font-medium">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {previewSkill.content as string}
+                              </ReactMarkdown>
+                            </div>
+                          </CardContent>
+                        </>
+                      ) : (
+                        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-4">
+                          <div className="w-16 h-16 rounded-2xl bg-muted/20 flex items-center justify-center text-muted-foreground/30 relative">
+                            <Eye className="w-8 h-8" />
+                            <div className="absolute inset-0 rounded-2xl border border-dashed border-muted-foreground/30 animate-[spin_20s_linear_infinite]" />
+                          </div>
+                          <div>
+                            <h3 className="font-extrabold text-foreground/60 text-sm tracking-wide uppercase">Xem trước Kỹ năng</h3>
+                            <p className="text-[12px] text-muted-foreground max-w-xs mt-1 leading-relaxed">Chọn một kỹ năng từ danh sách bên trái để biên dịch và xem nội dung chỉ dẫn Markdown chi tiết của Directive.</p>
+                          </div>
+                        </div>
+                      )}
+                    </Card>
+                  </div>
+                </div>
+
+                <section className="space-y-4 pt-4">
+                  <div className="flex items-center gap-2 px-1">
+                    <h2 className="text-xl font-bold">Cơ sở Tri thức</h2>
+                  </div>
+                  <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
+                    <CardContent className="px-8 py-6 space-y-6">
+                      <div className="relative border-2 border-dashed border-muted-foreground/20 rounded-[0.5rem] p-10 flex flex-col items-center justify-center bg-muted/5 hover:bg-primary/5 hover:border-primary/30 transition-all cursor-pointer group overflow-hidden">
+                        <input
+                          type="file"
+                          className="absolute inset-0 opacity-0 cursor-pointer z-20"
+                          onChange={handleFileUpload}
+                          disabled={isUploading}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <div className="w-14 h-14 rounded-[0.5rem] bg-primary/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform relative z-10">
+                          <Plus className={cn("w-7 h-7 text-primary", isUploading && "animate-spin")} />
+                        </div>
+                        <h3 className="text-base font-bold relative z-10">{isUploading ? "Đang tải lên..." : "Tải lên tài liệu huấn luyện"}</h3>
+                        <p className="text-xs text-muted-foreground text-center mt-2 max-w-sm relative z-10 leading-relaxed">Nhấn hoặc kéo thả tệp tài liệu chuyên sâu tại đây.</p>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {formData.knowledge_files.map((file, idx) => (
+                          <div key={idx} className={cn(
+                            "p-4 border rounded-[0.5rem] bg-background/50 flex items-center justify-between group transition-all hover:shadow-md",
+                            file.status === "indexing" ? "border-primary/30 bg-primary/5 animate-pulse" :
+                              file.status === "error" ? "border-destructive/30 bg-destructive/5" : "hover:border-primary/30"
+                          )}>
+                            <div className="flex items-center gap-4 flex-1 min-w-0">
+                              <div className={cn(
+                                "w-10 h-10 rounded-[0.5rem] flex items-center justify-center shrink-0 border",
+                                file.status === "indexing" ? "bg-primary/20 text-primary border-primary/20" :
+                                  file.status === "error" ? "bg-destructive/20 text-destructive border-destructive/20" :
+                                    "bg-red-500/10 text-red-500 border-red-500/10"
+                              )}>
+                                {file.status === "indexing" ? (
+                                  <Sparkles className="w-5 h-5 animate-spin" />
+                                ) : (
+                                  <span className="text-[10px] font-bold uppercase">{file.filename.split('.').pop()}</span>
                                 )}
                               </div>
-                            </div>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="rounded-[0.5rem] shrink-0 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
-                            onClick={() => setFormData({
-                              ...formData,
-                              knowledge_files: formData.knowledge_files.filter((_, i) => i !== idx)
-                            })}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      ))}
-
-                      {formData.knowledge_files.length === 0 && (
-                        <p className="col-span-2 text-center text-[10px] text-muted-foreground/50 italic py-4">Chưa có tài liệu nào được tải lên</p>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </section>
-            </TabsContent>
-
-            {/* --- Tab 3: Capabilities --- */}
-            <TabsContent value="capabilities" className="space-y-10 animate-in fade-in duration-200 min-h-[500px]">
-              {/* Section 1: Tools */}
-              <section className="space-y-4">
-                <div className="flex items-center justify-between px-1">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-bold text-foreground/90">Công cụ hỗ trợ</h2>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    className="rounded-lg h-8 px-3 text-[11px] font-bold text-primary hover:bg-primary/5 transition-all"
-                    onClick={() => setShowAddTool(true)}
-                  >
-                    <Plus className="w-3.5 h-3.5 mr-1" /> Quản lý công cụ
-                  </Button>
-                </div>
-                <div className="space-y-6">
-                  {(() => {
-                    const toolMap = new Map(availableTools.map(t => [t.name, t]));
-
-                    // Group tools by category
-                    const groupedTools = formData.tools.reduce((acc, toolObj) => {
-                      const toolInfo = toolMap.get(toolObj.name);
-                      const cat = toolInfo?.category || "Cơ bản";
-                      if (!acc[cat]) acc[cat] = [];
-                      acc[cat].push({ ...toolObj, info: toolInfo });
-                      return acc;
-                    }, {} as Record<string, any[]>);
-
-                    if (formData.tools.length === 0) {
-                      return (
-                        <div className="flex flex-col border rounded-xl bg-white/50 dark:bg-white/[0.02] shadow-sm">
-                          <div className="px-8 py-12 text-center space-y-3">
-                            <div className="w-12 h-12 rounded-xl bg-muted/20 flex items-center justify-center mx-auto text-muted-foreground/30">
-                              <Wrench className="w-6 h-6" />
-                            </div>
-                            <p className="text-[13px] text-muted-foreground italic">Chưa có công cụ nào được kích hoạt.</p>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return Object.entries(groupedTools).map(([category, tools]) => (
-                      <div key={category} className="space-y-3">
-                        <div className="flex items-center justify-between w-full px-2 group/cat">
-                          <div className="flex items-center gap-2">
-                            <h3 className="text-[11px] font-black uppercase tracking-widest text-muted-foreground/60 group-hover/cat:text-blue-500 transition-colors">{category}</h3>
-                            <Badge variant="outline" className="text-[8px] h-3.5 px-1.5 opacity-50">{tools.length}</Badge>
-
-                            {category === "Gmail" && !user?.is_google_tool_connected && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-5 px-2 text-[8px] font-black border-red-500/50 text-red-600 bg-red-500/5 hover:bg-red-500/10 hover:border-red-500 rounded-md transition-all animate-pulse ml-2"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  try {
-                                    const searchParams = new URLSearchParams(window.location.search);
-                                    const agentId = searchParams.get("id");
-                                    const connectUrl = agentId ? `/auth/google/connect?agent_id=${agentId}` : "/auth/google/connect";
-                                    const res = await fetchWithAuth(connectUrl);
-                                    if (res.ok) {
-                                      const data = await res.json();
-                                      if (data.url) window.location.href = data.url;
-                                    }
-                                  } catch (err) { console.error(err); }
-                                }}
-                              >
-                                KẾT NỐI GOOGLE
-                              </Button>
-                            )}
-
-                            {category === "Gmail" && user?.is_google_tool_connected && (
-                              <div className="flex items-center gap-1 ml-2 px-1.5 py-0.5 rounded bg-green-500/10 border border-green-500/20">
-                                <div className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
-                                <span className="text-[8px] font-black text-green-600 uppercase tracking-tighter">ĐÃ KẾT NỐI</span>
-                              </div>
-                            )}
-
-                            {category === "Facebook Fanpage" && !user?.is_facebook_connected && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-5 px-2 text-[8px] font-black border-blue-500/50 text-blue-600 bg-blue-500/5 hover:bg-blue-500/10 hover:border-blue-500 rounded-md transition-all ml-2"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  await handleConnectFacebook();
-                                }}
-                              >
-                                KẾT NỐI META
-                              </Button>
-                            )}
-
-                            {category === "Facebook Fanpage" && user?.is_facebook_connected && (
-                              <>
-                                <div className="flex items-center gap-1 ml-2 px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20">
-                                  <div className="w-1 h-1 rounded-full bg-blue-500 animate-pulse" />
-                                  <span className="text-[8px] font-black text-blue-600 uppercase tracking-tighter">
-                                    {selectedFacebookPageName ? selectedFacebookPageName : "META READY"}
-                                  </span>
+                              <div className="flex-1 min-w-0 pr-2">
+                                <p className="text-xs font-bold truncate text-foreground/90">{file.filename}</p>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  {file.status === "indexing" ? (
+                                    <>
+                                      <div className="w-1 h-1 rounded-full bg-primary animate-pulse" />
+                                      <p className="text-[9px] text-primary font-bold uppercase tracking-tight">Đang trích xuất tri thức...</p>
+                                    </>
+                                  ) : file.status === "error" ? (
+                                    <>
+                                      <div className="w-1 h-1 rounded-full bg-destructive" />
+                                      <p className="text-[9px] text-destructive font-bold uppercase tracking-tight">Lỗi Indexing</p>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div className="w-1 h-1 rounded-full bg-emerald-500" />
+                                      <p className="text-[9px] text-muted-foreground font-medium">Sẵn sàng huấn luyện</p>
+                                    </>
+                                  )}
                                 </div>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-5 px-2 text-[8px] font-black border-blue-500/30 text-blue-600 bg-blue-500/5 hover:bg-blue-500/10 rounded-md transition-all"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    await fetchFacebookPages(true);
-                                  }}
-                                >
-                                  CHỌN PAGE
-                                </Button>
-                              </>
-                            )}
+                              </div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="rounded-[0.5rem] shrink-0 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                              onClick={() => setFormData({
+                                ...formData,
+                                knowledge_files: formData.knowledge_files.filter((_, i) => i !== idx)
+                              })}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
                           </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setExpandedCategories(prev => ({ ...prev, [`main-${category}`]: !prev[`main-${category}`] }))}
-                            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted/50"
-                          >
-                            <ChevronRight className={cn("w-3.5 h-3.5 transition-transform duration-300", (expandedCategories[`main-${category}`] ?? true) && "rotate-90")} />
-                          </Button>
-                        </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </section>
+              </div>
 
-                        {(expandedCategories[`main-${category}`] ?? true) && (
-                          <div className="border rounded-xl bg-white/50 dark:bg-white/[0.02] shadow-sm overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
-                            {tools.map((toolObj, toolIndex) => {
-                              const toolName = toolObj.name;
-                              const toolInfo = toolObj.info || {
-                                name: toolName,
-                                description: "Công cụ đã được cấu hình",
-                                icon: "Terminal"
-                              };
-                              return (
-                                <ToolItem
-                                  key={`${category}-${toolName}-${toolIndex}`}
-                                  name={toolObj.label || toolInfo.label || toolInfo.name}
-                                  desc={toolObj.description || toolInfo.description}
-                                  active={toolObj.is_active}
-                                  category={category}
-                                  onToggle={() => {
-                                    const newTools = formData.tools.map(t =>
-                                      t.name === toolName ? { ...t, is_active: !t.is_active } : t
-                                    );
-                                    setFormData(prev => ({ ...prev, tools: newTools }));
-                                    if (agentId) {
-                                      handleSave({ ...formData, tools: newTools });
-                                    }
-                                  }}
-                                  onDelete={() => {
-                                    setConfirmConfig({
-                                      open: true,
-                                      title: "Xác nhận xóa",
-                                      description: `Bạn có chắc muốn gỡ bỏ công cụ ${toolObj.label || toolInfo.label || toolName}?`,
-                                      onConfirm: () => {
-                                        const newTools = formData.tools.filter(t => t.name !== toolName);
-                                        setFormData(prev => ({ ...prev, tools: newTools }));
-                                        if (agentId) {
-                                          handleSave({ ...formData, tools: newTools });
+              <div id="sec-capabilities" className="space-y-10 animate-in fade-in duration-200 border-t pt-8 scroll-mt-6">
+                <section className="space-y-4">
+                  <div className="flex items-center justify-between px-1">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-bold text-foreground/90">Công cụ hỗ trợ</h2>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      className="rounded-lg h-8 px-3 text-[11px] font-bold text-primary hover:bg-primary/5 transition-all"
+                      onClick={() => setShowAddTool(true)}
+                    >
+                      <Plus className="w-3.5 h-3.5 mr-1" /> Quản lý công cụ
+                    </Button>
+                  </div>
+                  <div className="space-y-6">
+                    {(() => {
+                      const toolMap = new Map(availableTools.map(t => [t.name, t]));
+                      const groupedTools = formData.tools.reduce((acc, toolObj) => {
+                        const toolInfo = toolMap.get(toolObj.name);
+                        const cat = toolInfo?.category || "Cơ bản";
+                        if (!acc[cat]) acc[cat] = [];
+                        acc[cat].push({ ...toolObj, info: toolInfo });
+                        return acc;
+                      }, {} as Record<string, any[]>);
+
+                      if (formData.tools.length === 0) {
+                        return (
+                          <div className="flex flex-col border rounded-xl bg-white/50 dark:bg-white/[0.02] shadow-sm">
+                            <div className="px-8 py-12 text-center space-y-3">
+                              <div className="w-12 h-12 rounded-xl bg-muted/20 flex items-center justify-center mx-auto text-muted-foreground/30">
+                                <Wrench className="w-6 h-6" />
+                              </div>
+                              <p className="text-[13px] text-muted-foreground italic">Chưa có công cụ nào được kích hoạt.</p>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return Object.entries(groupedTools).map(([category, tools]) => (
+                        <div key={category} className="space-y-3">
+                          <div className="flex items-center justify-between w-full px-2 group/cat">
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-[11px] font-black uppercase tracking-widest text-muted-foreground/60 group-hover/cat:text-blue-500 transition-colors">{category}</h3>
+                              <Badge variant="outline" className="text-[8px] h-3.5 px-1.5 opacity-50">{tools.length}</Badge>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setExpandedCategories(prev => ({ ...prev, [`main-${category}`]: !prev[`main-${category}`] }))}
+                              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted/50"
+                            >
+                              <ChevronRight className={cn("w-3.5 h-3.5 transition-transform duration-300", (expandedCategories[`main-${category}`] ?? true) && "rotate-90")} />
+                            </Button>
+                          </div>
+                          {(expandedCategories[`main-${category}`] ?? true) && (
+                            <div className="border rounded-xl bg-white/50 dark:bg-white/[0.02] shadow-sm overflow-hidden">
+                              {tools.map((toolObj, toolIndex) => {
+                                const toolName = toolObj.name;
+                                return (
+                                  <ToolItem
+                                    key={`${category}-${toolName}-${toolIndex}`}
+                                    name={toolObj.label || toolObj.info?.label || toolObj.info?.name || toolName}
+                                    desc={toolObj.description || toolObj.info?.description || ""}
+                                    active={toolObj.is_active}
+                                    category={category}
+                                    onToggle={() => {
+                                      const newTools = formData.tools.map(t =>
+                                        t.name === toolName ? { ...t, is_active: !t.is_active } : t
+                                      );
+                                      setFormData(prev => ({ ...prev, tools: newTools }));
+                                      if (agentId) handleSave({ ...formData, tools: newTools });
+                                    }}
+                                    onDelete={() => {
+                                      setConfirmConfig({
+                                        open: true,
+                                        title: "Xác nhận xóa",
+                                        description: `Bạn có chắc muốn gỡ bỏ công cụ ${toolObj.label || toolName}?`,
+                                        onConfirm: () => {
+                                          const newTools = formData.tools.filter(t => t.name !== toolName);
+                                          setFormData(prev => ({ ...prev, tools: newTools }));
+                                          if (agentId) handleSave({ ...formData, tools: newTools });
+                                          addNotification("info", "Đã gỡ", `Đã gỡ công cụ ${toolObj.label || toolName}`);
                                         }
-                                        addNotification("info", "Đã gỡ", `Đã gỡ công cụ ${toolObj.label || toolInfo.label || toolName}`);
-                                      }
-                                    });
-                                  }}
-                                  onSettings={() => {
-                                    setEditingTool(toolObj);
-                                    setToolOverrideData({
-                                      label: toolObj.label || toolInfo.label || toolName,
-                                      description: toolObj.description || toolInfo.description
-                                    });
-                                    setShowToolConfig(true);
-                                  }}
-                                >
-                                  {toolName === "text2sql" && (
-                                    <div className="space-y-4">
-                                      {/* Tool Sub-Header with Add Action */}
-                                      <div className="flex items-center justify-between px-1">
-                                        <div className="flex items-center gap-2">
-                                          <Network className="w-3.5 h-3.5 text-primary" />
-                                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-primary/70">Kết nối cơ sở dữ liệu</p>
+                                      });
+                                    }}
+                                    onSettings={() => {
+                                      setEditingTool(toolObj);
+                                      setToolOverrideData({
+                                        label: toolObj.label || toolObj.info?.label || toolName,
+                                        description: toolObj.description || toolObj.info?.description || ""
+                                      });
+                                      setShowToolConfig(true);
+                                    }}
+                                  >
+                                    {toolName === "text2sql" && (
+                                      <div className="space-y-4">
+                                        <div className="flex items-center justify-between px-1">
+                                          <div className="flex items-center gap-2">
+                                            <Network className="w-3.5 h-3.5 text-primary" />
+                                            <p className="text-[10px] font-black uppercase tracking-[0.15em] text-primary/70">Kết nối cơ sở dữ liệu</p>
+                                          </div>
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-7 px-2 rounded-lg text-[9px] font-bold text-primary hover:bg-primary/5 transition-all group"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setIsDataSourceSelectOpen(false);
+                                              setShowAddConnection(true);
+                                              setEditingConnectionId(null);
+                                            }}
+                                          >
+                                            <Plus className="w-3 h-3 mr-1" />
+                                            THÊM MỚI
+                                          </Button>
                                         </div>
-                                        <Button
-                                          size="sm"
-                                          variant="ghost"
-                                          className="h-7 px-2 rounded-lg text-[9px] font-bold text-primary hover:bg-primary/5 transition-all group"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setIsDataSourceSelectOpen(false);
-                                            setShowAddConnection(true);
-                                            setEditingConnectionId(null);
-                                          }}
-                                        >
-                                          <Plus className="w-3 h-3 mr-1 group-hover:rotate-90 transition-transform" />
-                                          THÊM MỚI
-                                        </Button>
-                                      </div>
-
-                                      <div className="space-y-3">
-                                        {/* Dropdown Selection as "Add to list" */}
                                         <div className="space-y-1.5">
                                           <label className="text-[10px] font-bold uppercase opacity-50 ml-1">Thêm nguồn dữ liệu</label>
                                           <Select
@@ -2077,64 +2050,46 @@ function CreateAgentContent() {
                                             onOpenChange={setIsDataSourceSelectOpen}
                                             value=""
                                             onValueChange={(val) => {
-                                              const currentIds = toolObj.config?.datasource_ids || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id] : []);
+                                              if (!val) return;
+                                              const config = toolObj.config || {};
+                                              const currentIds = (config.datasource_ids as string[]) || (config.datasource_id ? [config.datasource_id as string] : []);
                                               if (currentIds.includes(val)) return;
-
                                               const nextIds = [...currentIds, val];
                                               const newTools = formData.tools.map(t => t.name === "text2sql" ? {
                                                 ...t,
-                                                config: {
-                                                  ...t.config,
-                                                  datasource_ids: nextIds,
-                                                  datasource_id: nextIds[0] // Giữ lại để tương thích ngược nếu cần
-                                                }
+                                                config: { ...config, datasource_ids: nextIds, datasource_id: nextIds[0] }
                                               } : t);
                                               setFormData(prev => ({ ...prev, tools: newTools }));
-                                              if (agentId) {
-                                                handleSave({ ...formData, tools: newTools });
-                                              }
+                                              if (agentId) handleSave({ ...formData, tools: newTools });
                                             }}
                                           >
-                                            <SelectTrigger className="h-10 rounded-xl bg-background/50 border-muted-foreground/20 focus:ring-1 focus:ring-primary/30 text-xs font-bold shadow-sm">
+                                            <SelectTrigger className="h-10 rounded-xl bg-background/50 border-muted-foreground/20 text-xs font-bold shadow-sm">
                                               <SelectValue placeholder="Chọn kết nối để thêm vào Agent..." />
                                             </SelectTrigger>
                                             <SelectContent className="rounded-xl border-muted-foreground/20 shadow-2xl">
                                               {availableConnections.length > 0 ? (
-                                                availableConnections.map(conn => {
-                                                  const isSelected = (toolObj.config?.datasource_ids || []).includes(conn.id);
-                                                  return (
-                                                    <SelectItem key={conn.id} value={conn.id} disabled={isSelected} className="text-xs font-medium rounded-lg">
-                                                      <div className="flex items-center gap-2">
-                                                        <Database className="w-3.5 h-3.5 text-muted-foreground/50" />
-                                                        {conn.name} ({conn.engine})
-                                                        {isSelected && <Badge className="ml-2 h-3.5 text-[8px] bg-primary/10 text-primary border-none">Đã chọn</Badge>}
-                                                      </div>
-                                                    </SelectItem>
-                                                  );
-                                                })
+                                                availableConnections.map((conn) => (
+                                                  <SelectItem key={conn.id} value={conn.id} className="text-xs font-medium rounded-lg">
+                                                    <div className="flex items-center gap-2">
+                                                      <Database className="w-3.5 h-3.5 text-muted-foreground/50" />
+                                                      {conn.name} ({conn.engine})
+                                                    </div>
+                                                  </SelectItem>
+                                                ))
                                               ) : (
                                                 <div className="p-4 text-center">
                                                   <p className="text-[10px] text-muted-foreground mb-2">Chưa có kết nối nào.</p>
-                                                  <Button size="sm" variant="outline" className="h-7 text-[9px] font-bold rounded-lg" onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setIsDataSourceSelectOpen(false);
-                                                    setShowAddConnection(true);
-                                                    setEditingConnectionId(null);
-                                                  }}>Tạo tại đây</Button>
                                                 </div>
                                               )}
                                             </SelectContent>
                                           </Select>
                                         </div>
-
-                                        {/* List of Selected Connections */}
                                         <div className="space-y-2">
-                                          {(toolObj.config?.datasource_ids || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id] : [])).map((dsId: string) => {
-                                            const selectedDs = availableConnections.find(c => c.id === dsId);
+                                          {((toolObj.config?.datasource_ids as string[]) || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id as string] : [])).map((dsId: string) => {
+                                            const selectedDs = availableConnections.find((c) => c.id === dsId);
                                             if (!selectedDs) return null;
-
                                             return (
-                                              <div key={dsId} className="p-3 bg-primary/[0.02] dark:bg-primary/[0.01] border border-primary/10 rounded-xl flex items-center justify-between shadow-sm animate-in slide-in-from-top-2 duration-300">
+                                              <div key={dsId} className="p-3 bg-primary/[0.02] border border-primary/10 rounded-xl flex items-center justify-between shadow-sm">
                                                 <div className="flex items-center gap-3">
                                                   <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-800 flex items-center justify-center border border-primary/10 shadow-sm">
                                                     <Database className="w-5 h-5 text-primary" />
@@ -2145,39 +2100,17 @@ function CreateAgentContent() {
                                                       <Badge variant="outline" className="text-[8px] h-3.5 px-1.5 font-bold uppercase bg-primary/5 text-primary border-none">
                                                         {selectedDs.engine}
                                                       </Badge>
-                                                      <span className="text-[9px] text-muted-foreground font-medium opacity-60">
-                                                        {selectedDs.host}
-                                                      </span>
                                                     </div>
                                                   </div>
                                                 </div>
-                                                <div className="flex items-center gap-1">
+                                                <div className="flex items-center gap-2">
                                                   <Button
                                                     variant="ghost"
                                                     size="icon"
-                                                    className="h-8 w-8 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
-                                                    onClick={() => handleEditConnection(selectedDs)}
-                                                    title="Sửa kết nối"
-                                                  >
-                                                    <Edit2 className="w-3.5 h-3.5" />
-                                                  </Button>
-                                                  <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-8 w-8 rounded-lg hover:bg-destructive/10 hover:text-destructive transition-colors"
-                                                    onClick={() => handleDeleteConnection(selectedDs.id)}
-                                                    title="Xóa vĩnh viễn"
-                                                  >
-                                                    <Trash2 className="w-3.5 h-3.5" />
-                                                  </Button>
-                                                  <div className="w-[1px] h-3.5 bg-primary/10 mx-1" />
-                                                  <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-muted"
+                                                    className="w-7 h-7 rounded-lg text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-all shrink-0"
                                                     onClick={() => {
-                                                      const currentIds = toolObj.config?.datasource_ids || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id] : []);
-                                                      const nextIds = currentIds.filter((id: string) => id !== dsId);
+                                                      const currentIds = (toolObj.config?.datasource_ids as string[]) || (toolObj.config?.datasource_id ? [toolObj.config.datasource_id as string] : []);
+                                                      const nextIds = currentIds.filter(id => id !== dsId);
                                                       const newTools = formData.tools.map(t => t.name === "text2sql" ? {
                                                         ...t,
                                                         config: {
@@ -2197,10 +2130,9 @@ function CreateAgentContent() {
                                             );
                                           })}
                                         </div>
-                                        <p className="text-[9px] text-muted-foreground italic ml-1 opacity-60 leading-tight">Lưu ý: Agent sẽ dùng Embedding Model & API Key đã thiết lập ở tab "Cấu hình" để truy cập nguồn này.</p>
+                                        <p className="text-[9px] text-muted-foreground italic ml-1 opacity-60 leading-tight">Lưu ý: Agent sẽ dùng Embedding Model & API Key đã thiết lập ở tab &quot;Cấu hình&quot; để truy cập nguồn này.</p>
                                       </div>
-                                    </div>
-                                  )}
+                                    )}
                                 </ToolItem>
                               );
                             })}
@@ -2211,10 +2143,10 @@ function CreateAgentContent() {
                   })()}
                 </div>
               </section>
-            </TabsContent>
+              </div>
 
-            {/* --- Tab 4: Automation --- */}
-            <TabsContent value="automation" className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+              {/* --- Section 4: Automation & Workflows --- */}
+              <div id="sec-automation" className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500 border-t pt-8 scroll-mt-6">
               <section className="space-y-4">
                 <div className="flex items-center gap-2 px-1">
                   <h2 className="text-xl font-bold">Quy trình tự động</h2>
@@ -2230,8 +2162,9 @@ function CreateAgentContent() {
                   <Button className="rounded-[0.5rem] h-12 px-8 font-bold bg-primary text-white shadow-xl shadow-primary/20">Thiết lập Automation</Button>
                 </Card>
               </section>
-            </TabsContent>
-          </Tabs>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2604,7 +2537,7 @@ function CreateAgentContent() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-5 p-5 bg-muted/20 rounded-2xl border border-muted-foreground/10">
-                  {editingTool.info.supported_params.map((param: any) => (
+                  {editingTool.info.supported_params.map((param: { key: string; label: string; type: string; default?: string | number; desc?: string; options?: { value: string; label: string }[] }) => (
                     <div key={param.key} className="space-y-2">
                       <div className="flex justify-between items-center">
                         <label className="text-xs font-bold text-foreground/80 ml-1">{param.label}</label>
@@ -2623,7 +2556,7 @@ function CreateAgentContent() {
                             <SelectValue placeholder={`Chọn ${param.label.toLowerCase()}...`} />
                           </SelectTrigger>
                           <SelectContent className="rounded-xl border-muted-foreground/20">
-                            {param.options?.map((opt: any) => (
+                            {param.options?.map((opt: { value: string; label: string }) => (
                               <SelectItem key={opt.value} value={opt.value} className="text-xs font-medium">
                                 {opt.label}
                               </SelectItem>
@@ -2634,7 +2567,7 @@ function CreateAgentContent() {
                         <Input
                           type={param.type === "number" ? "number" : "text"}
                           placeholder={param.desc || `Nhập ${param.label.toLowerCase()}...`}
-                          value={editingTool.params?.[param.key] ?? param.default}
+                          value={(editingTool.params?.[param.key] as string | number) ?? (param.default as string | number) ?? ""}
                           onChange={(e) => {
                             const val = param.type === "number" ? parseInt(e.target.value) : e.target.value;
                             const currentParams = editingTool.params || {};
@@ -2670,7 +2603,8 @@ function CreateAgentContent() {
                       editingTool?.params?.human_in_loop ? "bg-primary" : "bg-muted-foreground/20"
                     )}
                     onClick={() => {
-                      const currentParams = editingTool?.params || {};
+                      if (!editingTool) return;
+                      const currentParams = editingTool.params || {};
                       setEditingTool({ ...editingTool, params: { ...currentParams, human_in_loop: !currentParams.human_in_loop } });
                     }}
                   >
@@ -2690,10 +2624,11 @@ function CreateAgentContent() {
                   <Input
                     type="number"
                     placeholder="Không giới hạn"
-                    value={editingTool?.params?.rate_limit || ""}
+                    value={(editingTool?.params?.rate_limit as string | number) || ""}
                     onChange={(e) => {
+                      if (!editingTool) return;
                       const val = e.target.value ? parseInt(e.target.value) : undefined;
-                      const currentParams = editingTool?.params || {};
+                      const currentParams = editingTool.params || {};
                       setEditingTool({ ...editingTool, params: { ...currentParams, rate_limit: val } });
                     }}
                     className="rounded-xl h-10 bg-background border-muted-foreground/20 text-xs font-medium"
@@ -2712,10 +2647,11 @@ function CreateAgentContent() {
                   <Input
                     type="number"
                     placeholder="Không giới hạn"
-                    value={editingTool?.params?.run_limit || ""}
+                    value={(editingTool?.params?.run_limit as string | number) || ""}
                     onChange={(e) => {
+                      if (!editingTool) return;
                       const val = e.target.value ? parseInt(e.target.value) : undefined;
-                      const currentParams = editingTool?.params || {};
+                      const currentParams = editingTool.params || {};
                       setEditingTool({ ...editingTool, params: { ...currentParams, run_limit: val } });
                     }}
                     className="rounded-xl h-10 bg-background border-muted-foreground/20 text-xs font-medium"
@@ -2731,10 +2667,11 @@ function CreateAgentContent() {
                   <Input
                     type="number"
                     placeholder="Không giới hạn"
-                    value={editingTool?.params?.thread_limit || ""}
+                    value={(editingTool?.params?.thread_limit as string | number) || ""}
                     onChange={(e) => {
+                      if (!editingTool) return;
                       const val = e.target.value ? parseInt(e.target.value) : undefined;
-                      const currentParams = editingTool?.params || {};
+                      const currentParams = editingTool.params || {};
                       setEditingTool({ ...editingTool, params: { ...currentParams, thread_limit: val } });
                     }}
                     className="rounded-xl h-10 bg-background border-muted-foreground/20 text-xs font-medium"
@@ -2754,6 +2691,7 @@ function CreateAgentContent() {
             </Button>
             <Button
               onClick={() => {
+                if (!editingTool) return;
                 const newTools = formData.tools.map(t =>
                   t.name === editingTool.name ? {
                     ...t,

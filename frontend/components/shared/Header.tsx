@@ -49,6 +49,8 @@ export function Header() {
               "skills": "Kỹ năng",
               "tools": "Công cụ",
               "connectors": "Kết nối"
+              ,"connection": "Connection"
+              ,"data-sources": "Data Sources"
             };
             
             const label = map[segment] || segment;

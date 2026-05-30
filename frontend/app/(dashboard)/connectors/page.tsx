@@ -282,15 +282,15 @@ export default function ConnectorsPage() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Kết nối (Connectors)</h1>
-          <p className="text-muted-foreground mt-1 text-sm font-medium opacity-80">Kết nối AI Agent với các hệ thống dữ liệu và ứng dụng bên ngoài.</p>
+          <h1 className="text-3xl font-bold tracking-tight">Data Source</h1>
+          <p className="text-muted-foreground mt-1 text-sm font-medium opacity-80">Quản lý Nguồn dữ liệu database để Agent truy vấn</p>
         </div>
         <Button
           onClick={() => setIsAddOpen(true)}
           className="rounded-[0.5rem] h-10 gap-2 shadow-lg shadow-primary/20 font-bold px-6"
         >
           <Plug2 className="w-4 h-4" />
-          Thêm kết nối mới
+          Thêm Data Source
         </Button>
       </div>
 

@@ -259,7 +259,20 @@ class MessengerService:
     async def send_text(self, recipient_id: str, message_text: str) -> dict[str, Any]:
         return await self.client.post(
             f"{self.page_id}/messages",
-            json={"recipient": {"id": recipient_id}, "message": {"text": message_text}},
+            json={
+                "messaging_type": "RESPONSE",
+                "recipient": {"id": recipient_id},
+                "message": {"text": message_text},
+            },
+        )
+
+    async def request_thread_control(self, recipient_id: str, metadata: str | None = None) -> dict[str, Any]:
+        return await self.client.post(
+            f"{self.page_id}/request_thread_control",
+            params={
+                "recipient": json.dumps({"id": recipient_id}),
+                "metadata": metadata or "OpenClaw requests thread control",
+            },
         )
 
     def _normalize_conversation(self, conversation: dict[str, Any]) -> dict[str, Any]:

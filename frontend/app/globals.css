@@ -326,3 +326,58 @@
   background: rgba(255, 255, 255, 0.4);
   background-clip: content-box;
 }
+
+/* Perspective utility */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+/* Floating ambient orbs */
+@keyframes orb-float-1 {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  33% {
+    transform: translate(30px, -50px) scale(1.12);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.92);
+  }
+}
+
+@keyframes orb-float-2 {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  50% {
+    transform: translate(-40px, 40px) scale(1.15);
+  }
+}
+
+@keyframes orb-float-3 {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  50% {
+    transform: translate(50px, 20px) scale(1.08);
+  }
+}
+
+.animate-orb-1 {
+  animation: orb-float-1 18s infinite ease-in-out;
+}
+
+.animate-orb-2 {
+  animation: orb-float-2 22s infinite ease-in-out;
+}
+
+.animate-orb-3 {
+  animation: orb-float-3 20s infinite ease-in-out;
+}
+
+/* Noise overlay */
+.noise-overlay {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  opacity: 0.015;
+}
+

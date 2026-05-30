@@ -44,13 +44,19 @@ def normalize_meta_error(data: dict[str, Any], status_code: int = 400) -> MetaGr
 
     message_lc = message.lower()
 
-    if status_code in {401, 403} or code in {190, 200, 10}:
+    if subcode == 2018464 or "conversation routing is not enabled" in message_lc:
+        action_required = "conversation_routing_not_enabled"
+    elif subcode == 2018300 or "another app is controlling this thread" in message_lc or "another app is controlling this conversation" in message_lc:
+        action_required = "thread_control"
+    elif subcode == 2018151 or "calling app is not the thread owner" in message_lc:
+        action_required = "not_thread_owner"
+    elif status_code in {401, 403} or code in {190, 200, 10}:
         action_required = "reauthorize" if code == 190 else "permission_missing"
     elif code in {4, 17, 32, 613} or status_code == 429:
         action_required = "rate_limited"
     elif "review" in message_lc:
         action_required = "app_review"
-    elif "another app is controlling this conversation" in message_lc or "pass_thread_control" in message_lc:
+    elif "pass_thread_control" in message_lc or "take_thread_control" in message_lc:
         action_required = "thread_control"
     elif "outside the allowed window" in message_lc or "24 hour" in message_lc:
         action_required = "messaging_window"

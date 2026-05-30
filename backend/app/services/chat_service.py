@@ -128,7 +128,21 @@ class ChatService:
         pool = await self.get_pool()
         checkpointer = AsyncPostgresSaver(pool)
         store = await self.get_store(pool)
-        graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
+        
+        # Load workflow dynamically if set
+        has_workflow = False
+        if agent_db.workflow_id:
+            from app.models.workflow import Workflow
+            result = await self.agent_repo.db.execute(select(Workflow).where(Workflow.id == agent_db.workflow_id))
+            workflow_db = result.scalar_one_or_none()
+            if workflow_db:
+                from app.agents.workflow_executor import WorkflowExecutor
+                executor = WorkflowExecutor(workflow_db.graph, agent_config)
+                graph = executor.app
+                has_workflow = True
+                
+        if not has_workflow:
+            graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
         
         # Sử dụng thread_id cụ thể
         final_thread_id = thread_id or f"direct:{user_id}"
@@ -140,9 +154,14 @@ class ChatService:
         input_data = Command(resume=command) if command else input_state
         
         final_state = await graph.ainvoke(input_data, config=thread_config)
-        ai_message = final_state["messages"][-1]
         
-        result = {"role": "assistant", "content": ai_message.content}
+        if has_workflow and "final_answer" in final_state:
+            content = final_state["final_answer"]
+        else:
+            ai_message = final_state["messages"][-1]
+            content = ai_message.content
+            
+        result = {"role": "assistant", "content": content}
 
         violations = self._evaluate_guardrails(ai_message.content or "", guardrails)
         if violations:
@@ -468,7 +487,19 @@ class ChatService:
                 await stack.enter_async_context(store)
                 
                 logger.info("⚙️ Đang khởi tạo Graph...")
-                graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
+                has_workflow = False
+                if agent_db.workflow_id:
+                    from app.models.workflow import Workflow
+                    result = await self.agent_repo.db.execute(select(Workflow).where(Workflow.id == agent_db.workflow_id))
+                    workflow_db = result.scalar_one_or_none()
+                    if workflow_db:
+                        from app.agents.workflow_executor import WorkflowExecutor
+                        executor = WorkflowExecutor(workflow_db.graph, agent_config)
+                        graph = executor.app
+                        has_workflow = True
+                        
+                if not has_workflow:
+                    graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
                 
                 # Metadata isolation
                 thread_config = {
@@ -546,8 +577,8 @@ class ChatService:
                             else:
                                 active_stream_run[node_name] = run_id
                             
-                            # Chỉ lấy content từ node chính (agent)
-                            is_output_node = node_name in ["agent"]
+                            # Chỉ lấy content từ node chính (agent) hoặc answer node trong workflow
+                            is_output_node = node_name in ["agent"] or (has_workflow and "answer" in node_name)
                             
                             chunk = event["data"]["chunk"]
                             content = chunk.content
@@ -918,7 +949,7 @@ class ChatService:
                 select(GoogleToolConnection).where(GoogleToolConnection.user_id == user_id_to_fetch)
             )
             connection = result.scalars().first()
-            if connection:
+            if connection and (connection.status or "active") == "active":
                 user_google_tokens = {
                     "access_token": connection.access_token,
                     "refresh_token": connection.refresh_token,
@@ -936,7 +967,7 @@ class ChatService:
                 select(FacebookConnection).where(FacebookConnection.user_id == user_id_to_fetch)
             )
             fb_connection = fb_result.scalars().first()
-            if fb_connection and fb_connection.selected_page_access_token:
+            if fb_connection and fb_connection.selected_page_access_token and (fb_connection.status or "active") == "active":
                 user_facebook_connection = {
                     "selected_page_id": fb_connection.selected_page_id,
                     "selected_page_name": fb_connection.selected_page_name,
@@ -1146,7 +1177,20 @@ class ChatService:
         pool = await self.get_pool()
         checkpointer = AsyncPostgresSaver(pool)
         store = await self.get_store(pool)
-        graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
+        
+        has_workflow = False
+        if agent_db.workflow_id:
+            from app.models.workflow import Workflow
+            result = await self.agent_repo.db.execute(select(Workflow).where(Workflow.id == agent_db.workflow_id))
+            workflow_db = result.scalar_one_or_none()
+            if workflow_db:
+                from app.agents.workflow_executor import WorkflowExecutor
+                executor = WorkflowExecutor(workflow_db.graph, agent_config)
+                graph = executor.app
+                has_workflow = True
+                
+        if not has_workflow:
+            graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
         
         config = {"configurable": {"thread_id": thread_id}}
         raw_history = [state async for state in graph.aget_state_history(config)]
