@@ -7,6 +7,8 @@ import {
   ArrowLeft, 
   Save, 
   Plus, 
+  Minus,
+  RotateCcw,
   Trash2, 
   Settings2, 
   Zap, 
@@ -57,6 +59,8 @@ interface WorkflowData {
   id: string;
   name: string;
   description: string;
+  is_scheduled?: boolean;
+  cron_expression?: string | null;
   graph: {
     nodes: NodeItem[];
     edges: EdgeItem[];
@@ -132,6 +136,48 @@ export default function WorkflowDesignerPage() {
   
   // Dragging and canvas references
   const canvasRef = useRef<HTMLDivElement>(null);
+  
+  // Premium zoom scale state
+  const [zoom, setZoom] = useState(1);
+  
+  // Click-and-drag panning state for premium canvas interaction
+  const [isPanning, setIsPanning] = useState(false);
+  const panStart = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Only left click initiates drag panning
+    if (e.button !== 0) return;
+    
+    const target = e.target as HTMLElement;
+    // Only pan if clicking on background canvas, svg grid overlay, or non-interactive items
+    if (target.closest('.canvas-bg') && !target.closest('.w-60')) {
+      setIsPanning(true);
+      if (canvasRef.current) {
+        panStart.current = {
+          x: e.clientX,
+          y: e.clientY,
+          scrollLeft: canvasRef.current.scrollLeft,
+          scrollTop: canvasRef.current.scrollTop
+        };
+      }
+    }
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isPanning || !canvasRef.current) return;
+    
+    e.preventDefault();
+    const dx = e.clientX - panStart.current.x;
+    const dy = e.clientY - panStart.current.y;
+    
+    canvasRef.current.scrollLeft = panStart.current.scrollLeft - dx;
+    canvasRef.current.scrollTop = panStart.current.scrollTop - dy;
+  };
+
+  const handleCanvasMouseUp = () => {
+    setIsPanning(false);
+  };
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"config" | "connection">("config");
 
@@ -357,6 +403,77 @@ export default function WorkflowDesignerPage() {
     fetchWorkflowDetails();
   }, [workflowId]);
 
+  // Premium Keyboard & Mouse Wheel Zooming shortcuts (Fixed Chrome conflict)
+  useEffect(() => {
+    // 1. Handle Ctrl / Alt + Scroll wheel to zoom on the window level to prevent browser zoom
+    const handleWheel = (e: WheelEvent) => {
+      const isZoomKey = e.ctrlKey || e.metaKey || e.altKey;
+      if (isZoomKey) {
+        // Prevent native browser zoom
+        e.preventDefault();
+        
+        const zoomStep = 0.05;
+        if (e.deltaY < 0) {
+          // Zoom in
+          setZoom(prev => Math.min(1.5, Number((prev + zoomStep).toFixed(2))));
+        } else {
+          // Zoom out
+          setZoom(prev => Math.max(0.5, Number((prev - zoomStep).toFixed(2))));
+        }
+      }
+    };
+
+    // 2. Handle global keyboard shortcuts (Ctrl / Alt + Plus/Minus/0, and single keys if not typing)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Check if user is actively typing in an input field or contenteditable area
+      const activeTag = document.activeElement?.tagName.toLowerCase();
+      const isTyping = activeTag === 'input' || 
+                       activeTag === 'textarea' || 
+                       document.activeElement?.hasAttribute('contenteditable') ||
+                       (document.activeElement as HTMLElement)?.isContentEditable;
+      
+      const isCtrl = e.ctrlKey || e.metaKey;
+      const isAlt = e.altKey;
+      
+      // If user is typing, do not intercept any shortcuts except standard inputs
+      if (isTyping) return;
+
+      // Handle Ctrl + Key or Alt + Key or Single Key (when not typing)
+      const shouldTriggerIn = (isCtrl && (e.key === '=' || e.key === '+')) || 
+                               (isAlt && (e.key === '=' || e.key === '+')) ||
+                               (!isCtrl && !isAlt && (e.key === '=' || e.key === '+'));
+                               
+      const shouldTriggerOut = (isCtrl && e.key === '-') || 
+                                (isAlt && e.key === '-') ||
+                                (!isCtrl && !isAlt && e.key === '-');
+                                
+      const shouldTriggerReset = (isCtrl && e.key === '0') || 
+                                  (isAlt && e.key === '0') ||
+                                  (!isCtrl && !isAlt && e.key === '0');
+
+      if (shouldTriggerIn) {
+        e.preventDefault();
+        setZoom(prev => Math.min(1.5, Number((prev + 0.1).toFixed(2))));
+      } else if (shouldTriggerOut) {
+        e.preventDefault();
+        setZoom(prev => Math.max(0.5, Number((prev - 0.1).toFixed(2))));
+      } else if (shouldTriggerReset) {
+        e.preventDefault();
+        setZoom(1);
+      }
+    };
+
+    // Add listeners to window with passive: false to successfully block Chrome default zooming behavior
+    window.addEventListener("wheel", handleWheel, { passive: false });
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("wheel", handleWheel);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+
   const fetchWorkflowDetails = async () => {
     try {
       const res = await fetchWithAuth(`/workflows/${workflowId}`);
@@ -394,7 +511,9 @@ export default function WorkflowDesignerPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          graph: workflow.graph
+          graph: workflow.graph,
+          is_scheduled: workflow.is_scheduled || false,
+          cron_expression: workflow.cron_expression || null
         })
       });
       if (res.ok) {
@@ -423,8 +542,8 @@ export default function WorkflowDesignerPage() {
             if (n.id === nodeId) {
               return {
                 ...n,
-                x: n.x + info.delta.x,
-                y: n.y + info.delta.y
+                x: n.x + info.delta.x / zoom,
+                y: n.y + info.delta.y / zoom
               };
             }
             return n;
@@ -433,6 +552,7 @@ export default function WorkflowDesignerPage() {
       };
     });
   };
+
 
   const handleAddNode = (type: string) => {
     if (!workflow) return;
@@ -612,7 +732,7 @@ export default function WorkflowDesignerPage() {
   }
 
   return (
-    <div className="h-[85vh] flex flex-col -m-6 relative overflow-hidden bg-[#f4f5f6] dark:bg-[#080809] select-none">
+    <div className="h-full w-full flex flex-col relative overflow-hidden bg-[#f4f5f6] dark:bg-[#080809] select-none">
       {/* Top Designer bar */}
       <div className="h-16 border-b bg-card px-6 flex items-center justify-between shadow-sm relative z-20 shrink-0">
         <div className="flex items-center gap-4">
@@ -733,24 +853,23 @@ export default function WorkflowDesignerPage() {
               </Button>
             </div>
           </div>
-
-          <div className="border-t pt-4">
-            <Badge className="bg-purple-500/10 text-purple-600 hover:bg-purple-500/10 border-purple-500/25 rounded-md font-bold py-1 flex items-center gap-1 mb-2">
-              <Zap className="w-3 h-3 text-purple-600" /> LangGraph Core
-            </Badge>
-            <p className="text-[10px] text-muted-foreground font-semibold leading-relaxed">
-              Các liên kết sẽ tự động vẽ bằng đường cong Bezier và có bong bóng luồng dữ liệu chuyển động.
-            </p>
-          </div>
         </div>
 
         {/* Center Grid Work Area Draggable Canvas */}
         <div 
           ref={canvasRef}
-          className="flex-1 overflow-auto relative"
+          onMouseDown={handleCanvasMouseDown}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={handleCanvasMouseUp}
+          onMouseLeave={handleCanvasMouseUp}
+          className="flex-1 overflow-auto scrollbar-none relative"
         >
           {/* Large Inner Canvas Scroll Area */}
-          <div className="w-[3000px] h-[3000px] bg-[radial-gradient(#d1d5db_1.2px,transparent_1.2px)] dark:bg-[radial-gradient(#1e293b_1.2px,transparent_1.2px)] [background-size:20px_20px] relative">
+          <div 
+            style={{ transform: `scale(${zoom})`, transformOrigin: '0 0' }}
+            className="canvas-bg w-[3000px] h-[3000px] bg-[radial-gradient(#d1d5db_1.2px,transparent_1.2px)] dark:bg-[radial-gradient(#1e293b_1.2px,transparent_1.2px)] [background-size:20px_20px] relative cursor-grab active:cursor-grabbing select-none"
+          >
+
           {/* Dynamic SVG connection curves overlay */}
           <svg className="absolute inset-0 pointer-events-none w-full h-full z-0">
             {workflow?.graph.edges.map((edge, i) => {
@@ -935,6 +1054,52 @@ export default function WorkflowDesignerPage() {
           </div>
         </div>
 
+        {/* Premium Floating Canvas Zoom HUD Controls */}
+        <div className="absolute bottom-6 left-[270px] z-30 flex items-center gap-2 p-1.5 rounded-2xl border border-zinc-200/50 dark:border-white/[0.05] bg-white/80 dark:bg-zinc-950/80 backdrop-blur-2xl shadow-xl select-none animate-in fade-in duration-300">
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={zoom <= 0.5}
+            onClick={() => setZoom(prev => Math.max(0.5, Number((prev - 0.1).toFixed(2))))}
+            className="w-8 h-8 rounded-xl hover:bg-secondary shrink-0 text-muted-foreground hover:text-foreground cursor-pointer animate-none"
+            title="Thu nhỏ (Zoom out)"
+          >
+            <Minus className="w-3.5 h-3.5" />
+          </Button>
+          
+          <div 
+            onClick={() => setZoom(1)}
+            className="min-w-[50px] text-center text-[10px] font-black uppercase tracking-wider text-muted-foreground hover:text-primary cursor-pointer select-none"
+            title="Đặt lại zoom về 100%"
+          >
+            {Math.round(zoom * 100)}%
+          </div>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={zoom >= 1.5}
+            onClick={() => setZoom(prev => Math.min(1.5, Number((prev + 0.1).toFixed(2))))}
+            className="w-8 h-8 rounded-xl hover:bg-secondary shrink-0 text-muted-foreground hover:text-foreground cursor-pointer animate-none"
+            title="Phóng to (Zoom in)"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </Button>
+
+          <div className="w-[1px] h-5 bg-zinc-200/60 dark:bg-white/[0.06] mx-0.5" />
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setZoom(1)}
+            className="w-8 h-8 rounded-xl hover:bg-secondary shrink-0 text-muted-foreground hover:text-foreground cursor-pointer animate-none"
+            title="Đặt về 100%"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+
+
         {/* Right Configuration Sidebar Editor */}
         <AnimatePresence>
           {selectedNodeId && (
@@ -996,6 +1161,108 @@ export default function WorkflowDesignerPage() {
                         className="rounded-xl h-10 font-bold"
                       />
                     </div>
+
+                    {/* Start Node Specific Trigger Settings */}
+                    {selectedNode.type === "start" && (
+                      <div className="space-y-5 animate-in fade-in duration-300">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-purple-600 block">
+                            Cấu hình Kích hoạt (Trigger)
+                          </label>
+                          <p className="text-[11px] text-muted-foreground leading-normal">
+                            Thiết lập cách quy trình này tự động bắt đầu thực thi.
+                          </p>
+                        </div>
+
+                        {/* Toggle switch for Cronjob Scheduler */}
+                        <div className="flex items-center justify-between p-3.5 rounded-2xl bg-secondary/40 border border-muted-foreground/10 hover:border-purple-500/20 transition-all">
+                          <div className="space-y-0.5 max-w-[200px]">
+                            <span className="text-xs font-extrabold text-foreground/90">Chạy định kỳ (Cronjob)</span>
+                            <p className="text-[9px] text-muted-foreground leading-normal font-medium">Tự động lặp lại theo lịch hẹn trước.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setWorkflow(prev => {
+                                if (!prev) return null;
+                                const nextScheduled = !prev.is_scheduled;
+                                return {
+                                  ...prev,
+                                  is_scheduled: nextScheduled,
+                                  cron_expression: nextScheduled ? (prev.cron_expression || "*/5 * * * *") : null
+                                };
+                              });
+                            }}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              workflow?.is_scheduled ? "bg-purple-600" : "bg-muted-foreground/20"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                                workflow?.is_scheduled ? "translate-x-5" : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        {workflow?.is_scheduled ? (
+                          <div className="space-y-3.5 p-4 rounded-2xl border border-purple-500/10 bg-purple-500/5 animate-in fade-in slide-in-from-top-2 duration-300">
+                            <div className="space-y-1.5">
+                              <label className="text-[10px] font-bold uppercase tracking-wider text-purple-600">Biểu thức Cron</label>
+                              <Input
+                                placeholder="*/5 * * * *"
+                                value={workflow?.cron_expression || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setWorkflow(prev => prev ? { ...prev, cron_expression: val } : null);
+                                }}
+                                className="rounded-xl h-10 font-mono text-xs font-bold border-purple-500/20 bg-background"
+                              />
+                              <p className="text-[9px] text-muted-foreground leading-normal">
+                                Định dạng: <code className="bg-muted px-1 py-0.5 rounded font-mono">phút giờ ngày tháng ngày-trong-tuần</code>
+                              </p>
+                            </div>
+
+                            {/* Quick Select Buttons */}
+                            <div className="space-y-1.5">
+                              <span className="text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground block">Mẫu thiết lập nhanh</span>
+                              <div className="flex flex-wrap gap-1.5">
+                                {[
+                                  { label: "5 phút", val: "*/5 * * * *" },
+                                  { label: "15 phút", val: "*/15 * * * *" },
+                                  { label: "1 giờ", val: "0 * * * *" },
+                                  { label: "00:00 hàng ngày", val: "0 0 * * *" },
+                                  { label: "08:00 hàng ngày", val: "0 8 * * *" }
+                                ].map((item) => (
+                                  <button
+                                    key={item.label}
+                                    type="button"
+                                    onClick={() => {
+                                      setWorkflow(prev => prev ? { ...prev, cron_expression: item.val } : null);
+                                    }}
+                                    className={`text-[9px] font-extrabold px-2.5 py-1 rounded-lg border transition-all ${
+                                      workflow?.cron_expression === item.val
+                                        ? "bg-purple-600 text-white border-purple-600"
+                                        : "bg-background text-muted-foreground hover:bg-purple-500/5 hover:text-purple-600 border-muted-foreground/15"
+                                    }`}
+                                  >
+                                    {item.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-3.5 rounded-2xl border border-dashed text-xs text-muted-foreground leading-relaxed flex items-start gap-2.5 bg-muted/5">
+                            <Zap className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="font-bold text-foreground/80 block mb-0.5">Kích hoạt theo sự kiện (Event-driven)</span>
+                              Quy trình sẽ tự động được kích hoạt thông qua Webhook, API call hoặc tin nhắn chat trực tiếp của người dùng.
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* LLM Specific inputs */}
                     {selectedNode.type === "llm" && (

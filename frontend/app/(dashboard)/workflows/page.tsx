@@ -147,7 +147,7 @@ export default function WorkflowsPage() {
         
         <div className="space-y-1">
           <h1 className="text-3xl font-extrabold tracking-tight text-foreground/90 flex items-center gap-2">
-            <GitBranch className="w-8 h-8 text-purple-500" /> Quy trình (Workflows)
+            Workflows
           </h1>
           <p className="text-sm text-muted-foreground max-w-xl">
             Tự động hóa các tác vụ phức tạp bằng cách kết hợp nhiều Agent và nguồn dữ liệu vào các luồng xử lý tuần tự hoặc song song.

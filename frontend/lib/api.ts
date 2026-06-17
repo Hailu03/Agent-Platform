@@ -9,6 +9,7 @@ if (typeof window !== "undefined" && API_URL.includes("localhost")) {
 
 interface FetchOptions extends RequestInit {
   headers?: Record<string, string>;
+  skipAuthLogout?: boolean;
 }
 
 let isRefreshing = false;
@@ -24,7 +25,7 @@ function onRrefreshed(token: string) {
 }
 
 export async function fetchWithAuth(endpoint: string, options: FetchOptions = {}): Promise<Response> {
-  let token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
   
   const headers = {
     ...options.headers,
@@ -33,7 +34,7 @@ export async function fetchWithAuth(endpoint: string, options: FetchOptions = {}
 
   const url = endpoint.startsWith("http") ? endpoint : `${API_URL}${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
   
-  let response = await fetch(url, { ...options, headers, credentials: "include" });
+  const response = await fetch(url, { ...options, headers, credentials: "include" });
 
   // Handle 401 Unauthorized - Attempt Token Refresh
   if (response.status === 401 && typeof window !== "undefined") {
@@ -78,17 +79,23 @@ export async function fetchWithAuth(endpoint: string, options: FetchOptions = {}
         return await fetch(url, { ...options, headers: newHeaders, credentials: "include" });
       } else {
         isRefreshing = false;
-        console.error("Refresh failed, logging out...");
-        localStorage.removeItem("access_token");
-        
-        // If we're on a page that requires auth, redirect to login
-        if (window.location.pathname !== "/" && window.location.pathname !== "/login") {
-          window.location.href = "/?session_expired=true";
+        // Only force logout when refresh is truly unauthorized.
+        if (refreshRes.status === 401 || refreshRes.status === 403) {
+          console.error("Refresh unauthorized, logging out...");
+          localStorage.removeItem("access_token");
+
+          // If we're on a page that requires auth, redirect to login
+          if (!options.skipAuthLogout && window.location.pathname !== "/" && window.location.pathname !== "/login") {
+            window.location.href = "/?session_expired=true";
+          }
+        } else {
+          console.warn("Refresh temporarily unavailable:", refreshRes.status);
         }
       }
     } catch (error) {
       isRefreshing = false;
-      console.error("Error during token refresh:", error);
+      // Network/backend restart during boot should not hard-logout user.
+      console.warn("Error during token refresh:", error);
     }
   }
 

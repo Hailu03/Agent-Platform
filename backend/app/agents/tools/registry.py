@@ -107,6 +107,11 @@ def get_tools_by_names(tool_configs: List[Any], agent_config: dict = None) -> Li
     
     tools = []
     for config in tool_configs:
+        # Nếu đã là instance của BaseTool (hoặc StructuredTool), giữ nguyên và append thẳng
+        if hasattr(config, "name") and hasattr(config, "description") and hasattr(config, "_run"):
+            tools.append(config)
+            continue
+            
         name = config if isinstance(config, str) else config.get("name")
         is_active = True if isinstance(config, str) else config.get("is_active", True)
             

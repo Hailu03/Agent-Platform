@@ -1,5 +1,5 @@
-from app.celery_worker import celery_app
-from app.services.graph_rag_service import GraphRAGService
+﻿from app.celery_worker import celery_app
+from app.services.data.graph_rag_service import GraphRAGService
 from app.agents.providers.google import GoogleProvider
 from app.core.logging import get_logger
 import asyncio
@@ -222,9 +222,9 @@ def index_datasource_task(ds_id: str):
         from app.models.base import AsyncSessionLocal
         from app.models.datasource import DataSource
         from app.models.semantic import SemanticTable, SemanticColumn, SemanticRelationship
-        from app.services.duckdb_service import DuckDBService
-        from app.services.powerbi_service import PowerBIService
-        from app.services.graph_rag_service import GraphRAGService
+        from app.services.data.duckdb_service import DuckDBService
+        from app.services.integrations.powerbi_service import PowerBIService
+        from app.services.data.graph_rag_service import GraphRAGService
         from app.core.security import decrypt_password
         from sqlalchemy import select, delete as sa_delete
         

@@ -1,4 +1,4 @@
-from app.repositories.agent_repo import AgentRepository
+﻿from app.repositories.agent_repo import AgentRepository
 from app.models.agent import Agent
 from app.models.skill import Skill
 from app.schemas.agent import AgentCreate, AgentUpdate
@@ -6,7 +6,7 @@ import uuid
 import json
 from sqlalchemy import select
 
-from app.services.notification_service import NotificationService
+from app.services.notifications.notification_service import NotificationService
 from app.models.notification import NotificationType
 
 class AgentService:
@@ -16,6 +16,9 @@ class AgentService:
 
     async def get_agent(self, agent_id: str, user_id: str):
         agent = await self.repo.get_by_id(agent_id, user_id)
+        if not agent and agent_id == "router":
+            from app.agents.router_agent import get_or_create_router
+            agent = await get_or_create_router(self.repo, user_id)
         if agent:
             self._mask_agent_keys(agent)
         return agent
@@ -108,7 +111,36 @@ class AgentService:
         
         agent = await self.repo.get_by_id(agent_id, user_id)
         if not agent:
-            return None
+            if agent_id == "router":
+                from datetime import datetime
+                db_agent = Agent(
+                    id="router",
+                    user_id=user_id,
+                    name="WAO Assistant",
+                    description="Trợ lý AI cá nhân thông minh.",
+                    instructions=(
+                        "Bạn là WAO Assistant - Trợ lý AI cá nhân thông minh của hệ thống.\n"
+                        "Nhiệm vụ của bạn là hỗ trợ và trò chuyện thân thiện, xã giao với người dùng (như chào hỏi, hỏi thăm, giải thích chức năng). "
+                        "Bạn có khả năng điều phối và chuyển tiếp các câu hỏi chuyên môn của họ sang các Trợ lý con chuyên biệt "
+                        "khi cần thiết (như Trợ lý Chăm sóc Fanpage, Trợ lý Gmail, Phân tích dữ liệu SQL, v.v.).\n"
+                        "Hãy chào hỏi thân thiện, giới thiệu bản thân là WAO Assistant và khéo léo giới thiệu các Trợ lý con chuyên nghiệp "
+                        "mà hệ thống đang có để người dùng biết cách sử dụng."
+                    ),
+                    model_provider="openai",
+                    model_name="gpt-4o-mini",
+                    tools=[],
+                    skills=[],
+                    sub_agents=[],
+                    knowledge_files=[],
+                    triggers=[],
+                    mcp_servers=[],
+                    is_active=True,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
+                )
+                agent = await self.repo.create(db_agent)
+            else:
+                return None
         
         # Kiểm tra sự thay đổi của knowledge_files
         new_data = agent_in.model_dump(exclude_unset=True)

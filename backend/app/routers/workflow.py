@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+﻿from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
@@ -7,7 +7,7 @@ from app.models.user import User
 from app.schemas.workflow import WorkflowCreate, WorkflowUpdate, WorkflowResponse, WorkflowRunRequest
 from app.core.security import get_current_user
 from app.repositories.workflow_repo import WorkflowRepository
-from app.services.workflow_service import WorkflowService
+from app.services.workflows.workflow_service import WorkflowService
 from app.agents.workflow_executor import WorkflowExecutor
 import time
 
@@ -185,3 +185,91 @@ async def delete_workflow(
     if not success:
         raise HTTPException(status_code=404, detail="Không tìm thấy quy trình để xóa")
     return None
+
+import asyncio
+from sqlalchemy import select
+from app.models.workflow import Workflow
+
+async def run_workflow_background(workflow: Workflow, payload: dict, db: AsyncSession):
+    """
+    Thực thi quy trình Workflow chạy nền khi nhận sự kiện Webhook.
+    """
+    try:
+        # Setup agent config
+        from app.repositories.agent_repo import AgentRepository
+        agent_repo = AgentRepository(db)
+        agents = await agent_repo.list_by_user(workflow.user_id)
+        agent_config = {}
+        if agents:
+            agent = agents[0]
+            agent_config = {
+                "id": agent.id,
+                "model_provider": agent.model_provider,
+                "model_name": agent.model_name,
+                "api_key": agent.api_key
+            }
+        else:
+            agent_config = {
+                "id": "background_agent", 
+                "model_provider": "google", 
+                "model_name": "gemini-2.5-flash"
+            }
+            
+        graph_data = workflow.graph
+        if isinstance(graph_data, str):
+            import json
+            graph_data = json.loads(graph_data)
+            
+        executor = WorkflowExecutor(graph_data, agent_config)
+        initial_state = {
+            "messages": [("user", f"Background trigger: {workflow.name}")],
+            "variable_pool": {"start": payload},
+            "current_node": "",
+            "final_answer": "",
+            "thread_id": f"webhook_{workflow.id}_{int(time.time())}"
+        }
+        
+        async for chunk in executor.app.astream(initial_state):
+            pass # Thực thi đến khi hoàn tất
+        logger.info(f"✅ [Workflow Background Run] Hoàn thành quy trình {workflow.name} (ID: {workflow.id}) qua webhook.")
+    except Exception as e:
+        logger.error(f"❌ [Workflow Background Run] Lỗi thực thi nền cho quy trình {workflow.id}: {e}")
+
+@router.post("/webhooks/{trigger_type}")
+async def handle_workflow_webhook(
+    trigger_type: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Nhận sự kiện Webhook (ví dụ Gmail webhook hoặc Facebook chat webhook)
+    và kích hoạt quy trình Workflow có trigger tương ứng chạy nền.
+    """
+    logger.info(f"📬 Nhận webhook cho trigger '{trigger_type}' | Payload: {payload}")
+    
+    # Quét tất cả workflows của hệ thống
+    result = await db.execute(select(Workflow))
+    workflows = result.scalars().all()
+    
+    triggered_count = 0
+    for wf in workflows:
+        graph_data = wf.graph
+        if isinstance(graph_data, str):
+            import json
+            graph_data = json.loads(graph_data)
+            
+        # Tìm Start Node xem có khớp trigger cấu hình không
+        nodes = graph_data.get("nodes", [])
+        start_node = next((n for n in nodes if n.get("type") == "start"), None)
+        if start_node:
+            trigger_config = start_node.get("data", {}).get("trigger", {})
+            if trigger_config.get("type") == trigger_type:
+                logger.info(f"⚡ Trigger khớp! Kích hoạt quy trình '{wf.name}' (ID: {wf.id}) chạy nền.")
+                asyncio.create_task(run_workflow_background(wf, payload, db))
+                triggered_count += 1
+                
+    return {
+        "status": "processed", 
+        "trigger_type": trigger_type, 
+        "triggered_count": triggered_count
+    }

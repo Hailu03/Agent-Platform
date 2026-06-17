@@ -1,7 +1,7 @@
-from typing import Type, Optional
+﻿from typing import Type, Optional
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
-from app.services.graph_rag_service import GraphRAGService
+from app.services.data.graph_rag_service import GraphRAGService
 from app.agents.factory import get_model
 from app.core.logging import get_logger
 

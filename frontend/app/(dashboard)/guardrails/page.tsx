@@ -162,9 +162,6 @@ export default function GuardrailsPage() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20 shadow-inner">
-            <ShieldCheck className="w-5 h-5 text-primary" />
-          </div>
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Cấu hình Guardrails</h1>
             <p className="text-muted-foreground mt-1 text-sm font-medium opacity-80">

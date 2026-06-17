@@ -2,15 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { 
-  LayoutDashboard, 
-  Bot, 
+import {
+  Bot,
   Database, 
   GitBranch, 
-  Plug2, 
+  Plug2,
   DatabaseZap,
-  Wrench,
-  Hammer,
   ShieldCheck,
   ChevronDown, 
   ChevronRight, 
@@ -62,13 +59,10 @@ export function Sidebar() {
   }, []);
 
   const menuItems: MenuItem[] = [
-    { name: "Tổng quan", href: "/dashboard", icon: LayoutDashboard },
     { name: "Hội thoại", href: "/chat", icon: MessageSquare },
     { name: "AI Agents", href: "/agents", icon: Bot },
     { name: "Knowledge", href: "/knowledge", icon: Database },
     { name: "Workflows", href: "/workflows", icon: GitBranch },
-    { name: "Skills", href: "/skills", icon: Wrench },
-    { name: "Tools", href: "/tools", icon: Hammer },
     { name: "Guardrails", href: "/guardrails", icon: ShieldCheck },
     { name: "Connection", href: "/connection", icon: Plug2 },
     { name: "Data Sources", href: "/data-sources", icon: DatabaseZap },

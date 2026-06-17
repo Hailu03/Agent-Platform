@@ -1,4 +1,4 @@
-import json
+﻿import json
 import logging
 from typing import List, Dict, Any, Optional, Type
 from langchain_core.tools import BaseTool
@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from app.models.base import get_db
 from app.models.datasource import DataSource
-from app.services.duckdb_service import DuckDBService
-from app.services.graph_rag_service import GraphRAGService
+from app.services.data.duckdb_service import DuckDBService
+from app.services.data.graph_rag_service import GraphRAGService
 from app.core.security import decrypt_password
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,11 @@ class Text2SQLTool(BaseTool):
     async def _arun(self, question: str, datasource_id: Optional[str] = None) -> str:
         # Ưu tiên datasource_id từ tham số, sau đó đến cấu hình tool trong agent
         ds_ids = [datasource_id] if datasource_id else []
-        
+        allowlist = None
+        masking = None
+        query_timeout = 10  # Mặc định 10 giây
+        readonly_user = True
+
         if not ds_ids and self.agent_config:
             # Tìm cấu hình của tool này trong agent.tools
             tools_config = self.agent_config.get("tools", [])
@@ -39,12 +43,18 @@ class Text2SQLTool(BaseTool):
                     config = t.get("config", {})
                     # Ưu tiên mảng datasource_ids (Multi-select), sau đó đến datasource_id (Single-select cũ)
                     ds_ids = config.get("datasource_ids") or ([config.get("datasource_id")] if config.get("datasource_id") else [])
+                    
+                    # Trích xuất cấu hình bảo mật chuyên sâu của Semantic Layer
+                    allowlist = config.get("table_allowlist")
+                    masking = config.get("column_masking")
+                    query_timeout = config.get("query_timeout", 10)
+                    readonly_user = config.get("readonly_user", True)
                     break
         
         if not ds_ids:
             return "Lỗi: Không xác định được nguồn dữ liệu (DataSource IDs). Vui lòng cung cấp datasource_id hoặc cấu hình trong Agent."
 
-        logger.info(f"📊 Text2SQL: Đang xử lý câu hỏi '{question}' cho {len(ds_ids)} datasources: {ds_ids}")
+        logger.info(f"📊 Text2SQL Semantic Agent: Đang xử lý câu hỏi '{question}' cho {len(ds_ids)} datasources: {ds_ids}")
         
         # 1. Lấy thông tin chi tiết cho TẤT CẢ Datasources
         ds_configs = []
@@ -91,6 +101,14 @@ class Text2SQLTool(BaseTool):
                 ds_names_str = ", ".join([ds.name for ds in data_sources])
                 schema_context = await graph_rag.query(f"Tìm cấu trúc bảng và cột liên quan đến: {question} trong các datasources: {ds_names_str}")
                 
+                # Áp dụng bộ lọc cấu trúc bảng & cột (Allowlist & Masking) để ẩn các thông tin nhạy cảm khỏi LLM
+                from app.services.data.semantic_layer import SemanticLayerService
+                schema_context = SemanticLayerService.filter_schema_context(
+                    schema_context=schema_context,
+                    allowlist=allowlist,
+                    masking=masking
+                )
+                
                 # 3. Sử dụng LLM để sinh SQL
                 llm = getattr(self, "llm", None)
                 if not llm and self.agent_config:
@@ -111,9 +129,9 @@ class Text2SQLTool(BaseTool):
                 ])
 
                 sql_prompt = (
-                    f"Bạn là một chuyên gia SQL đa nền tảng. Bạn có quyền truy cập vào các databases sau: {ds_names_str}.\n"
+                    f"Bạn là một chuyên gia SQL đa nền tảng và là một Semantic Data Agent. Bạn có quyền truy cập vào các databases sau: {ds_names_str}.\n"
                     f"DATABASE ENGINES: {[d['engine'] for d in ds_configs]}\n"
-                    f"SCHEMA CONTEXT (GraphRAG):\n{schema_context}\n\n"
+                    f"SCHEMA CONTEXT (Đã được phân quyền bởi Semantic Layer):\n{schema_context}\n\n"
                     f"CÂU HỎI: {question}\n\n"
                     f"YÊU CẦU QUAN TRỌNG:\n"
                     f"1. CHỈ TRẢ VỀ CÂU LỆNH SQL, không giải thích gì thêm.\n"
@@ -141,14 +159,77 @@ class Text2SQLTool(BaseTool):
                 
                 logger.info(f"✨ SQL sinh ra (Multi-DB): {sql_query}")
 
-                # 4. Thực thi SQL (DuckDB tự động quản lý các kết nối đã đăng ký trong context)
-                with DuckDBService.execution_context(ds_configs) as conn:
-                    rows = DuckDBService.execute_query(conn, sql_query)
+                # Kiểm duyệt tính an toàn (Chỉ cho phép đọc dữ liệu)
+                if readonly_user:
+                    is_safe = SemanticLayerService.is_readonly_query(sql_query)
+                    if not is_safe:
+                        error_msg = "Chặn thực thi: Câu lệnh SQL sinh ra chứa các thao tác ghi dữ liệu hoặc sửa đổi cấu trúc (Không an toàn)."
+                        SemanticLayerService.log_query(
+                            agent_id=self.agent_config.get("id", "unknown") if self.agent_config else "unknown",
+                            user_id=self.agent_config.get("user_id", "unknown") if self.agent_config else "unknown",
+                            sql_query=sql_query,
+                            status="blocked",
+                            error_message=error_msg
+                        )
+                        return f"Lỗi bảo mật: {error_msg}"
+
+                # 4. Thực thi SQL thông qua DuckDB chạy dưới Thread Pool có kiểm soát thời gian (Timeout)
+                import asyncio
+                loop = asyncio.get_running_loop()
+                
+                def execute_db_call():
+                    with DuckDBService.execution_context(ds_configs) as conn:
+                        return DuckDBService.execute_query(conn, sql_query)
+
+                try:
+                    rows = await asyncio.wait_for(
+                        loop.run_in_executor(None, execute_db_call),
+                        timeout=float(query_timeout)
+                    )
+                except asyncio.TimeoutError:
+                    error_msg = f"Thời gian thực thi truy vấn vượt giới hạn cho phép ({query_timeout} giây)."
+                    SemanticLayerService.log_query(
+                        agent_id=self.agent_config.get("id", "unknown") if self.agent_config else "unknown",
+                        user_id=self.agent_config.get("user_id", "unknown") if self.agent_config else "unknown",
+                        sql_query=sql_query,
+                        status="timeout",
+                        error_message=error_msg
+                    )
+                    return f"Lỗi: {error_msg}"
+                except Exception as execution_err:
+                    error_msg = str(execution_err)
+                    SemanticLayerService.log_query(
+                        agent_id=self.agent_config.get("id", "unknown") if self.agent_config else "unknown",
+                        user_id=self.agent_config.get("user_id", "unknown") if self.agent_config else "unknown",
+                        sql_query=sql_query,
+                        status="failed",
+                        error_message=error_msg
+                    )
+                    raise execution_err
                     
                 if not rows:
+                    SemanticLayerService.log_query(
+                        agent_id=self.agent_config.get("id", "unknown") if self.agent_config else "unknown",
+                        user_id=self.agent_config.get("user_id", "unknown") if self.agent_config else "unknown",
+                        sql_query=sql_query,
+                        status="success",
+                        row_count=0
+                    )
                     return f"Truy vấn thành công nhưng không có dữ liệu trả về cho câu hỏi: '{question}'.\nSQL đã thực thi: {sql_query}"
                 
-                # Trả về kết quả thô để LLM tự trình bày lại (định dạng này giúp LLM dễ đọc hơn JSON thô)
+                # Áp dụng che giấu các trường dữ liệu nhạy cảm (Column Masking) ở kết quả đầu ra
+                rows = SemanticLayerService.apply_masking_to_results(rows, masking)
+
+                # Ghi nhận audit log thành công
+                SemanticLayerService.log_query(
+                    agent_id=self.agent_config.get("id", "unknown") if self.agent_config else "unknown",
+                    user_id=self.agent_config.get("user_id", "unknown") if self.agent_config else "unknown",
+                    sql_query=sql_query,
+                    status="success",
+                    row_count=len(rows)
+                )
+
+                # Trả về kết quả đã xử lý an toàn
                 return {
                     "status": "success",
                     "row_count": len(rows),
@@ -157,7 +238,7 @@ class Text2SQLTool(BaseTool):
                 }
 
             except Exception as e:
-                logger.error(f"❌ Lỗi Text2SQL: {e}")
+                logger.error(f"❌ Lỗi Text2SQL Semantic Agent: {e}")
                 return f"Lỗi khi thực hiện truy vấn dữ liệu: {str(e)}"
             finally:
                 await db.close()

@@ -1,4 +1,4 @@
-import json
+﻿import json
 import asyncio
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
@@ -8,7 +8,7 @@ from typing import Optional
 from app.models.base import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.services.notification_service import NotificationService
+from app.services.notifications.notification_service import NotificationService
 from app.schemas.notification import NotificationListResponse
 from app.core.logging import get_logger
 

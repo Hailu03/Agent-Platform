@@ -1,4 +1,4 @@
-import time
+﻿import time
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,9 +16,9 @@ from app.schemas.connections import (
     DataSourceRead,
 )
 from app.schemas.semantic import TableRead, ColumnRead, RelationshipRead, SchemaResponse
-from app.services.duckdb_service import DuckDBService
-from app.services.powerbi_service import PowerBIService
-from app.services.graph_rag_service import GraphRAGService
+from app.services.data.duckdb_service import DuckDBService
+from app.services.integrations.powerbi_service import PowerBIService
+from app.services.data.graph_rag_service import GraphRAGService
 
 from app.repositories.datasource_repo import DataSourceRepository
 

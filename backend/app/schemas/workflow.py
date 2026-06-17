@@ -7,6 +7,8 @@ class WorkflowBase(BaseModel):
     description: Optional[str] = None
     graph: Dict[str, Any] = {"nodes": [], "edges": []}
     is_active: bool = True
+    is_scheduled: bool = False
+    cron_expression: Optional[str] = None
 
 class WorkflowCreate(WorkflowBase):
     pass
@@ -16,6 +18,8 @@ class WorkflowUpdate(BaseModel):
     description: Optional[str] = None
     graph: Optional[Dict[str, Any]] = None
     is_active: Optional[bool] = None
+    is_scheduled: Optional[bool] = None
+    cron_expression: Optional[str] = None
 
 class WorkflowResponse(WorkflowBase):
     id: str

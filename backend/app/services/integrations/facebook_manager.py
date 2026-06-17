@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.schemas.artifact import AgentArtifact, AgentArtifactDisplay, AgentArtifactSource
-from app.services.meta_graph import MetaGraphClient, MetaGraphError
+from app.services.integrations.meta_graph import MetaGraphClient, MetaGraphError
 
 
 def normalize_name(value: str | None) -> str:

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Type
+﻿from typing import Any, Dict, Optional, Type
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
@@ -6,13 +6,13 @@ from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.security import decrypt_password
-from app.services.facebook_manager import (
+from app.services.integrations.facebook_manager import (
     FacebookPageService,
     FacebookSafeResponse,
     MessengerService,
     MetaIdentityResolver,
 )
-from app.services.meta_graph import MetaGraphClient, MetaGraphError
+from app.services.integrations.meta_graph import MetaGraphClient, MetaGraphError
 
 logger = get_logger(__name__)
 

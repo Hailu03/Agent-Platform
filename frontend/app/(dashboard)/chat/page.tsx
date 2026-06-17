@@ -51,9 +51,15 @@ interface Conversation {
   updated_at: string;
 }
 
+const AUTO_ROUTER_AGENT = {
+  id: "router",
+  name: "Tự động chọn Agent",
+  description: "Tự động định tuyến câu hỏi tới Agent phù hợp nhất dựa trên mô tả."
+};
+
 export default function ChatPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(AUTO_ROUTER_AGENT);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [isLoadingAgents, setIsLoadingAgents] = useState(true);
@@ -71,10 +77,9 @@ export default function ChatPage() {
         const res = await fetchWithAuth("/agents/");
         if (res.ok) {
           const data = await res.json();
-          setAgents(data);
-          if (data.length > 0) {
-            setSelectedAgent(data[0]);
-          }
+          const list = [AUTO_ROUTER_AGENT, ...data];
+          setAgents(list);
+          setSelectedAgent(AUTO_ROUTER_AGENT);
         }
       } catch (error) {
         console.error("Failed to fetch agents:", error);
@@ -317,9 +322,7 @@ export default function ChatPage() {
                 <ChevronRight className="w-5 h-5" />
               </Button>
             )}
-            <div className="w-9 h-9 rounded-xl bg-primary/5 flex items-center justify-center border border-primary/10">
-              <Zap className="w-4 h-4 text-primary fill-primary/20" />
-            </div>
+            
             <div>
               {activeThreadId ? (
                 <div className="flex flex-col">
@@ -358,31 +361,19 @@ export default function ChatPage() {
                   )}
                 </div>
               ) : (
-                <h3 className="text-base font-black tracking-tight">WAO Chat</h3>
+                <div className="flex flex-col">
+                  <h3 className="text-base font-black tracking-tight flex items-center gap-1.5 text-foreground">
+                    WAO Assistant
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[8px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                      Auto-Routing
+                    </span>
+                  </h3>
+                </div>
               )}
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-3 px-3 py-1.5 rounded-xl bg-muted/30 border border-border/20">
-              <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/40 leading-none">Agent:</span>
-              <Select 
-                value={selectedAgent?.id || ""} 
-                onValueChange={(val) => setSelectedAgent(agents.find(a => a.id === val) || null)}
-              >
-                <SelectTrigger className="h-5 p-0 border-none bg-transparent shadow-none focus:ring-0 text-xs font-bold tracking-tight hover:text-primary transition-colors gap-2">
-                  <span>{selectedAgent?.name || "Chọn Agent..."}</span>
-                </SelectTrigger>
-                <SelectContent className="rounded-xl border-border/40 shadow-xl p-1">
-                  {agents.map(agent => (
-                    <SelectItem key={agent.id} value={agent.id} className="rounded-lg font-bold text-xs py-2 px-3 focus:bg-primary focus:text-white transition-all cursor-pointer mb-0.5">
-                      {agent.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             <Button 
               variant="default" 
               size="sm"

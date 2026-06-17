@@ -357,6 +357,7 @@ function CreateAgentContent() {
     skills: [] as { name: string, is_active: boolean }[],
     knowledge_files: [] as { filename: string, url: string, object_name: string, status?: "pending" | "indexing" | "completed" | "error", task_id?: string }[],
     workflow_id: "",
+    mcp_servers: [] as string[],
 
     // Embedding Configuration
     embedding_provider: "google",
@@ -463,6 +464,7 @@ function CreateAgentContent() {
   });
 
   const isDataLoadedRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isLoadingData && isDataLoadedRef.current) {
@@ -521,13 +523,17 @@ function CreateAgentContent() {
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({ "Gmail": true, "Cơ bản": true, "Database": true });
   const [availableConnections, setAvailableConnections] = useState<{ id: string, name: string, engine: string }[]>([]);
   const [availableWorkflows, setAvailableWorkflows] = useState<any[]>([]);
+  const [availableMcpServers, setAvailableMcpServers] = useState<any[]>([]);
   const [showAddConnection, setShowAddConnection] = useState(false);
   const [availableToolSearch, setAvailableToolSearch] = useState("");
+  const [skillSearch, setSkillSearch] = useState("");
+  const [skillLibrarySearch, setSkillLibrarySearch] = useState("");
   const [facebookPages, setFacebookPages] = useState<{ id: string; name: string; category?: string; tasks?: string[] }[]>([]);
   const [selectedFacebookPageId, setSelectedFacebookPageId] = useState<string | null>(null);
   const [selectedFacebookPageName, setSelectedFacebookPageName] = useState<string | null>(null);
   const [showFacebookPagePicker, setShowFacebookPagePicker] = useState(false);
   const [isLoadingFacebookPages, setIsLoadingFacebookPages] = useState(false);
+  const [pendingToolConnection, setPendingToolConnection] = useState<{ name: string; label?: string; category: string } | null>(null);
   const [isCreatingConnection, setIsCreatingConnection] = useState(false);
   const [newConnectionData, setNewConnectionData] = useState({
     name: "",
@@ -568,8 +574,10 @@ function CreateAgentContent() {
     params?: Record<string, unknown>;
   } | null>(null);
   const [toolOverrideData, setToolOverrideData] = useState({ label: "", description: "" });
-  const [previewWidth, setPreviewWidth] = useState(480);
+  const [previewWidth, setPreviewWidth] = useState(420);
   const [isResizing, setIsResizing] = useState(false);
+  const [showInspector, setShowInspector] = useState(false);
+  const [inspectorTab, setInspectorTab] = useState<"trace" | "rag" | "tool">("trace");
 
   const startResizing = (e: React.MouseEvent) => {
     setIsResizing(true);
@@ -579,8 +587,13 @@ function CreateAgentContent() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
-      const newWidth = window.innerWidth - e.clientX;
-      if (newWidth > 320 && newWidth < 800) {
+      const containerWidth = containerRef.current?.offsetWidth ?? window.innerWidth;
+      const containerRight = containerRef.current
+        ? containerRef.current.getBoundingClientRect().right
+        : window.innerWidth;
+      const newWidth = containerRight - e.clientX;
+      const maxWidth = Math.min(640, containerWidth - 420);
+      if (newWidth >= 320 && newWidth <= maxWidth) {
         setPreviewWidth(newWidth);
       }
     };
@@ -599,6 +612,18 @@ function CreateAgentContent() {
       window.removeEventListener("mouseup", stopResizing);
     };
   }, [isResizing]);
+
+  useEffect(() => {
+    const clampPreviewWidth = () => {
+      if (!containerRef.current || !showPreview) return;
+      const containerWidth = containerRef.current.offsetWidth;
+      const maxWidth = Math.min(640, containerWidth - 420);
+      if (previewWidth > maxWidth) setPreviewWidth(Math.max(320, maxWidth));
+    };
+    const observer = new ResizeObserver(clampPreviewWidth);
+    if (containerRef.current) observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [showPreview, previewWidth]);
 
   const handleToolConfigChange = (toolName: string, config: Record<string, unknown>) => {
     setFormData(prev => ({
@@ -649,6 +674,23 @@ function CreateAgentContent() {
       addNotification("error", "Lỗi", "Không thể tải danh sách Facebook Pages.");
     } finally {
       setIsLoadingFacebookPages(false);
+    }
+  };
+
+  const handleConnectGoogle = async () => {
+    try {
+      const connectUrl = agentId ? `/auth/google/connect?agent_id=${agentId}` : "/auth/google/connect";
+      const res = await fetchWithAuth(connectUrl);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        addNotification("error", "Lỗi kết nối", data.detail || "Không thể khởi tạo đăng nhập Google.");
+        return;
+      }
+      const data = await res.json();
+      if (data.url) window.location.href = data.url;
+    } catch (error) {
+      console.error("Google connect failed", error);
+      addNotification("error", "Lỗi", "Không thể chuyển tới Google Login.");
     }
   };
 
@@ -793,10 +835,11 @@ function CreateAgentContent() {
   useEffect(() => {
     const fetchDependencies = async () => {
       try {
-        const [toolsRes, skillsRes, workflowsRes] = await Promise.all([
+        const [toolsRes, skillsRes, workflowsRes, mcpRes] = await Promise.all([
           fetchWithAuth("/agents/tools/available"),
           fetchWithAuth("/skills/"),
-          fetchWithAuth("/workflows/")
+          fetchWithAuth("/workflows/"),
+          fetchWithAuth("/mcp/")
         ]);
         if (toolsRes.ok) {
           const tools = await toolsRes.json();
@@ -809,6 +852,10 @@ function CreateAgentContent() {
         if (workflowsRes.ok) {
           const workflows = await workflowsRes.json();
           setAvailableWorkflows(workflows);
+        }
+        if (mcpRes.ok) {
+          const mcp = await mcpRes.json();
+          setAvailableMcpServers(mcp);
         }
       } catch (error) {
         console.error("Failed to fetch dependencies:", error);
@@ -867,6 +914,7 @@ function CreateAgentContent() {
               embedding_provider: data.embedding_provider || "google",
               embedding_model: data.embedding_model || "text-embedding-004",
               embedding_api_key: data.embedding_api_key || "",
+              mcp_servers: data.mcp_servers || [],
             });
 
             setInitialKeys({
@@ -1200,8 +1248,8 @@ function CreateAgentContent() {
   };
 
   return (
-    <div className={cn(
-      "flex -m-8 h-[calc(100vh-64px)] overflow-hidden bg-[#fbfbfd] dark:bg-black animate-in fade-in duration-700 relative",
+    <div ref={containerRef} className={cn(
+      "flex -m-8 h-[calc(100vh-64px)] overflow-hidden bg-[#fbfbfd] dark:bg-black animate-in fade-in duration-700",
       isLoadingData && "opacity-50 pointer-events-none"
     )}>
       {isLoadingData && (
@@ -1212,11 +1260,13 @@ function CreateAgentContent() {
           </div>
         </div>
       )}
-      <div className={cn(
-        "flex-1 overflow-y-auto transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] custom-scrollbar",
-        showPreview ? "pl-8 pr-6 pt-0 pb-12" : "pl-10 pr-10 pt-0 pb-20"
-      )}>
-        <div className={cn("space-y-3 pt-5 transition-all duration-500 mx-auto w-full", showPreview ? "max-w-5xl" : "max-w-[980px]")}>
+      <div
+        className={cn(
+          "flex-1 min-w-0 overflow-y-auto overflow-x-hidden custom-scrollbar",
+          showPreview ? "px-6 pt-0 pb-12" : "pl-10 pr-10 pt-0 pb-20"
+        )}
+      >
+        <div className={cn("space-y-3 pt-5 transition-all duration-500 w-full", showPreview ? "" : "mx-auto max-w-[980px]")}>
           <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
             <div className="space-y-1.5 flex-1">
               <Link href="/agents" className="inline-flex items-center text-[10px] font-bold text-muted-foreground/40 hover:text-primary transition-all group">
@@ -1225,7 +1275,7 @@ function CreateAgentContent() {
               </Link>
               <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                 <div>
-                  <h1 className="text-2xl font-black tracking-tight text-foreground/90 uppercase">Xây dựng Trợ lý AI</h1>
+                  <h1 className="text-2xl font-black tracking-tight text-foreground/90 uppercase">AI Agent Studio</h1>
                   <p className="text-[12px] text-muted-foreground font-medium opacity-70 leading-tight">Thiết kế tư duy và quy trình vận hành của các AI Agent.</p>
                 </div>
                 <div className="flex items-center gap-1 p-0.5 bg-muted/60 dark:bg-zinc-900/40 rounded-lg border shadow-sm self-start sm:self-center">
@@ -1473,7 +1523,7 @@ function CreateAgentContent() {
                   </div>
                   <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
                     <CardContent className="px-8 py-2 space-y-5">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      <div className="grid gap-8" style={{ gridTemplateColumns: showPreview ? "1fr" : "repeat(2, 1fr)" }}>
                         <div className="space-y-4">
                           <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Tên Agent</label>
                           <Input
@@ -1550,7 +1600,7 @@ function CreateAgentContent() {
                     <h2 className="text-xl font-bold">Chọn Model LLM</h2>
                   </div>
                   <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
-                    <CardContent className="px-8 py-2 grid grid-cols-1 md:grid-cols-2 gap-1">
+                    <CardContent className="px-8 py-2 grid gap-1" style={{ gridTemplateColumns: showPreview ? "1fr" : "repeat(2, 1fr)" }}>
                       <div className="space-y-4">
                         <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Bên cung cấp</label>
                         <Select
@@ -1644,7 +1694,7 @@ function CreateAgentContent() {
                     <h2 className="text-xl font-bold">Chọn Embedding Model</h2>
                   </div>
                   <Card className="rounded-[0.5rem] border shadow-sm bg-white/70 dark:bg-white/[0.02] backdrop-blur-xl">
-                    <CardContent className="px-8 py-2 grid grid-cols-1 md:grid-cols-2 gap-1">
+                    <CardContent className="px-8 py-2 grid gap-1" style={{ gridTemplateColumns: showPreview ? "1fr" : "repeat(2, 1fr)" }}>
                       <div className="space-y-4">
                         <label className="text-sm font-bold text-foreground/70 ml-1 block mb-2">Bên cung cấp</label>
                         <Select
@@ -1747,15 +1797,26 @@ function CreateAgentContent() {
 
                 <div className={cn(
                   "flex-1 grid gap-6 min-h-0 transition-all duration-300",
-                  (showPreview && previewWidth > 400) ? "grid-cols-1 overflow-y-auto custom-scrollbar pr-2" : "grid-cols-1 lg:grid-cols-[380px_1fr]"
+                  (showPreview && previewWidth > 400) || !previewSkill
+                    ? "grid-cols-1"
+                    : "grid-cols-1 lg:grid-cols-[380px_minmax(0,520px)]"
                 )}>
                   <div className={cn(
                     "flex flex-col min-h-0 transition-all duration-300",
                     (showPreview && previewWidth > 400) && "min-h-[400px] h-[400px]"
                   )}>
                     <Card className="rounded-[1rem] border shadow-xl bg-white/40 dark:bg-white/[0.02] backdrop-blur-2xl flex-1 flex flex-col overflow-hidden ring-1 ring-white/50 dark:ring-white/5">
-                      <CardHeader className="px-5 py-4 border-b bg-muted/20">
+                      <CardHeader className="px-5 py-4 border-b bg-muted/20 space-y-3">
                         <CardTitle className="text-[11px] font-bold text-foreground/60 uppercase tracking-widest">Thư viện Kỹ năng</CardTitle>
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50" />
+                          <Input
+                            value={skillLibrarySearch}
+                            onChange={(e) => setSkillLibrarySearch(e.target.value)}
+                            placeholder="Tìm kỹ năng..."
+                            className="h-8 rounded-xl pl-9 text-xs border-muted-foreground/20 bg-background/60"
+                          />
+                        </div>
                       </CardHeader>
                       <CardContent className="p-0 flex-1 overflow-y-auto custom-scrollbar">
                         <div className="p-2 space-y-1">
@@ -1775,7 +1836,7 @@ function CreateAgentContent() {
                                 <div className="px-2 py-1.5 text-[10px] font-bold text-muted-foreground/50 uppercase tracking-tight">Thư viện mẫu có sẵn</div>
                                 <DropdownMenuSeparator />
                                 {availableSkills.filter(s => s.is_template && !formData.skills.some(fs => fs.name === s.name)).length > 0 ? (
-                                  availableSkills.filter(s => s.is_template && !formData.skills.some(fs => fs.name === s.name)).map(skill => (
+                                  availableSkills.filter(s => s.is_template && !formData.skills.some(fs => fs.name === s.name)).filter(s => !skillLibrarySearch || s.name.toLowerCase().includes(skillLibrarySearch.toLowerCase()) || s.description?.toLowerCase().includes(skillLibrarySearch.toLowerCase())).map(skill => (
                                     <DropdownMenuItem
                                       key={skill.id}
                                       className="flex flex-col items-start gap-1 p-3 cursor-pointer group"
@@ -1812,7 +1873,7 @@ function CreateAgentContent() {
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </div>
-                          {availableSkills.filter(s => s.is_template && formData.skills.some(fs => fs.name === s.name)).map(skill => {
+                          {availableSkills.filter(s => s.is_template && formData.skills.some(fs => fs.name === s.name)).filter(s => !skillLibrarySearch || s.name.toLowerCase().includes(skillLibrarySearch.toLowerCase()) || s.description?.toLowerCase().includes(skillLibrarySearch.toLowerCase())).map(skill => {
                             const isActive = formData.skills.some(s => s.name === skill.name);
                             return (
                               <div
@@ -1867,7 +1928,7 @@ function CreateAgentContent() {
                             </Button>
                           </div>
                           {availableSkills.filter(s => !s.is_template).length > 0 ? (
-                            availableSkills.filter(s => !s.is_template).map((skill, index) => {
+                            availableSkills.filter(s => !s.is_template).filter(s => !skillLibrarySearch || s.name.toLowerCase().includes(skillLibrarySearch.toLowerCase()) || s.description?.toLowerCase().includes(skillLibrarySearch.toLowerCase())).map((skill, index) => {
                               const isActive = formData.skills.some(s => s.name === skill.name);
                               return (
                                 <div
@@ -1951,20 +2012,15 @@ function CreateAgentContent() {
                       </CardContent>
                     </Card>
                   </div>
-                  <div className={cn(
-                    "flex-1 flex flex-col min-w-0 transition-all duration-300",
-                    (showPreview && previewWidth > 400) && "min-h-[600px] mt-2"
-                  )}>
-                    <Card className="rounded-[1.5rem] flex-1 border border-primary/15 shadow-xl bg-white/60 dark:bg-zinc-950/40 backdrop-blur-2xl flex flex-col overflow-hidden relative ring-1 ring-white/10 dark:ring-white/5">
+                  {previewSkill && (
+                  <div className="flex flex-col min-w-0 w-full" style={{ height: "600px" }}>
+                    <Card className="rounded-[1.5rem] border border-primary/15 shadow-xl bg-white/60 dark:bg-zinc-950/40 backdrop-blur-2xl flex flex-col overflow-hidden relative ring-1 ring-white/10 dark:ring-white/5 h-full">
                       <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(22,163,74,0.012)_1px,transparent_1px),linear-gradient(to_bottom,rgba(22,163,74,0.012)_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none -z-10 dark:bg-[linear-gradient(to_right,rgba(22,163,74,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(22,163,74,0.02)_1px,transparent_1px)]" />
                       <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-primary/5 rounded-full blur-[80px] pointer-events-none -z-10 dark:bg-primary/10" />
 
-                      {previewSkill ? (
-                        <>
+                      <>
                           <div className="flex items-center justify-between px-6 py-2 border-b border-muted-foreground/10 bg-black/[0.02] dark:bg-white/[0.01] text-[9px] font-mono tracking-widest text-muted-foreground/70 shrink-0 select-none">
                             <div className="flex items-center gap-2">
-                              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shadow-[0_0_8px_rgba(22,163,74,0.8)]" />
-                              <span>SYSTEM_DIRECTIVE_COMPILER: ACTIVE</span>
                             </div>
                             <div className="flex items-center gap-4">
                               <span>LINES: <span className="text-foreground font-black">{(previewSkill.content as string).split('\n').length}</span></span>
@@ -2027,21 +2083,10 @@ function CreateAgentContent() {
                               </ReactMarkdown>
                             </div>
                           </CardContent>
-                        </>
-                      ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-4">
-                          <div className="w-16 h-16 rounded-2xl bg-muted/20 flex items-center justify-center text-muted-foreground/30 relative">
-                            <Eye className="w-8 h-8" />
-                            <div className="absolute inset-0 rounded-2xl border border-dashed border-muted-foreground/30 animate-[spin_20s_linear_infinite]" />
-                          </div>
-                          <div>
-                            <h3 className="font-extrabold text-foreground/60 text-sm tracking-wide uppercase">Xem trước Kỹ năng</h3>
-                            <p className="text-[12px] text-muted-foreground max-w-xs mt-1 leading-relaxed">Chọn một kỹ năng từ danh sách bên trái để biên dịch và xem nội dung chỉ dẫn Markdown chi tiết của Directive.</p>
-                          </div>
-                        </div>
-                      )}
+                      </>
                     </Card>
                   </div>
+                  )}
                 </div>
 
                 <section className="space-y-4 pt-4">
@@ -2144,6 +2189,7 @@ function CreateAgentContent() {
                       const toolMap = new Map(availableTools.map(t => [t.name, t]));
                       const groupedTools = formData.tools.reduce((acc, toolObj) => {
                         const toolInfo = toolMap.get(toolObj.name);
+                        if (!toolInfo && !(toolObj as any).label) return acc;
                         const cat = toolInfo?.category || "Cơ bản";
                         if (!acc[cat]) acc[cat] = [];
                         acc[cat].push({ ...toolObj, info: toolInfo });
@@ -2340,8 +2386,69 @@ function CreateAgentContent() {
                       </div>
                     ));
                   })()}
+
+                  {/* MCP Servers in active list */}
+                  {formData.mcp_servers.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between w-full px-2">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-[11px] font-black uppercase tracking-widest text-muted-foreground/60">MCP Servers</h3>
+                          <Badge variant="outline" className="text-[8px] h-3.5 px-1.5 opacity-50">{formData.mcp_servers.length}</Badge>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-7 px-2 rounded-lg text-[10px] font-bold text-emerald-600 hover:bg-emerald-500/5"
+                          onClick={() => setShowAddTool(true)}
+                        >
+                          <Plus className="w-3 h-3 mr-1" /> Thêm
+                        </Button>
+                      </div>
+                      <div className="border rounded-xl bg-white/50 dark:bg-white/[0.02] shadow-sm overflow-hidden divide-y">
+                        {formData.mcp_servers.map((serverId: string) => {
+                          const server = availableMcpServers.find((s: any) => s.id === serverId);
+                          if (!server) return null;
+                          return (
+                            <div key={serverId} className="px-5 py-3 flex items-center justify-between group hover:bg-muted/30 transition-all duration-200">
+                              <div className="flex items-center gap-4 flex-1 min-w-0">
+                                <div className="w-8 h-8 rounded-[0.5rem] flex items-center justify-center shrink-0 shadow-sm border bg-emerald-500/10 border-emerald-500/20">
+                                  <Cpu className="w-4 h-4 text-emerald-600" />
+                                </div>
+                                <div className="flex-1 min-w-0 py-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="text-[13px] font-bold text-foreground/90">{server.name}</p>
+                                    <Badge className="text-[8px] h-4 bg-emerald-500/10 text-emerald-600 border-none font-black px-1.5">MCP</Badge>
+                                    {!server.is_active && (
+                                      <Badge className="text-[8px] h-4 bg-amber-500/10 text-amber-600 border-none font-black px-1.5">Paused</Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground font-mono truncate">{server.url}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)] mr-2" />
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                                  onClick={() => {
+                                    const newMcp = formData.mcp_servers.filter((id: string) => id !== serverId);
+                                    setFormData(prev => ({ ...prev, mcp_servers: newMcp }));
+                                    if (agentId) handleSave({ ...formData, mcp_servers: newMcp });
+                                  }}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </section>
+
               </div>
 
               {/* --- Section 4: Automation & Workflows --- */}
@@ -2433,19 +2540,20 @@ function CreateAgentContent() {
         <div
           style={{ width: `${previewWidth}px` }}
           className={cn(
-            "p-4 h-full relative transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] shrink-0",
-            isResizing && "transition-none" // Tắt animation khi đang kéo để mượt
+            "flex-shrink-0 relative p-4",
+            isResizing ? "transition-none" : "transition-[width] duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
           )}
         >
-          {/* Resize Handle - Edge Left */}
+          {/* Resize Handle */}
           <div
             onMouseDown={startResizing}
             className={cn(
-              "absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-[100] group",
-              isResizing ? "bg-primary/20" : "hover:bg-primary/10"
+              "absolute left-0 top-4 bottom-4 w-1.5 cursor-col-resize z-[100] group flex items-center justify-center",
+              isResizing ? "bg-primary/30" : "bg-border/60 hover:bg-primary/30"
             )}
+            style={{ borderRadius: "9999px" }}
           >
-            <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 w-1 h-8 rounded-full bg-muted-foreground/20 group-hover:bg-primary/40 transition-colors" />
+            <div className="w-0.5 h-10 rounded-full bg-muted-foreground/30 group-hover:bg-primary/60 transition-colors" />
           </div>
 
           <ChatInterface
@@ -2454,6 +2562,12 @@ function CreateAgentContent() {
             isEmbed={true}
             onClose={() => setShowPreview(false)}
             showAudit={true}
+            isTest={true}
+            showInspector={showInspector}
+            setShowInspector={setShowInspector}
+            inspectorTab={inspectorTab}
+            setInspectorTab={setInspectorTab}
+            previewWidth={previewWidth}
           />
         </div>
       )}
@@ -2582,46 +2696,32 @@ function CreateAgentContent() {
                 </div>
 
                 {filteredAvailableToolGroups.length > 0 ? filteredAvailableToolGroups.map(([category, tools]) => (
-                  <div key={category} className="space-y-4">
+                  <div key={category} className="space-y-3">
                     <div className="flex items-center gap-2 px-1">
                       <h3 className="text-[11px] font-black uppercase tracking-widest text-muted-foreground/70">{category}</h3>
                       <Badge variant="outline" className="text-[8px] h-4 px-1.5 opacity-60">{tools.length}</Badge>
-                      {category === "Facebook Fanpage" && !user?.is_facebook_connected && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 px-2 text-[8px] font-black border-blue-500/50 text-blue-600 bg-blue-500/5 hover:bg-blue-500/10 rounded-md"
-                          onClick={handleConnectFacebook}
-                        >
-                          KẾT NỐI META
-                        </Button>
-                      )}
-                      {category === "Facebook Fanpage" && user?.is_facebook_connected && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 px-2 text-[8px] font-black border-blue-500/30 text-blue-600 bg-blue-500/5 hover:bg-blue-500/10 rounded-md"
-                          onClick={() => fetchFacebookPages(true)}
-                        >
-                          {selectedFacebookPageName ? `PAGE: ${selectedFacebookPageName}` : "CHỌN PAGE"}
-                        </Button>
-                      )}
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
                       {tools.map((tool) => {
                         const existingTool = formData.tools.find(t => t.name === tool.name);
                         const isActive = !!existingTool;
+                        const requiresOAuth = category === "Facebook Fanpage" || category === "Gmail";
                         return (
                           <div
                             key={tool.name}
                             className={cn(
-                              "p-4 border rounded-2xl transition-all duration-300 flex items-start gap-4 group relative overflow-hidden",
+                              "p-4 border rounded-2xl transition-all duration-300 flex items-start gap-3 group relative overflow-hidden cursor-pointer",
                               isActive
                                 ? "bg-primary/[0.03] border-primary/30 shadow-sm"
-                                : "bg-white dark:bg-zinc-900/50 hover:border-primary/50 hover:shadow-xl hover:-translate-y-0.5 cursor-pointer"
+                                : "bg-white dark:bg-zinc-900/50 hover:border-primary/50 hover:shadow-lg hover:-translate-y-0.5"
                             )}
                             onClick={() => {
+                              if (requiresOAuth) {
+                                setShowAddTool(false);
+                                setPendingToolConnection({ name: tool.name, label: tool.label, category });
+                                return;
+                              }
                               if (!isActive) {
                                 setFormData(prev => ({
                                   ...prev,
@@ -2632,27 +2732,26 @@ function CreateAgentContent() {
                             }}
                           >
                             <div className={cn(
-                              "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border transition-all duration-500 shadow-sm",
-                              isActive ? "bg-white dark:bg-zinc-800 border-primary/20 shadow-primary/10" : "bg-muted/30 group-hover:bg-primary/5 group-hover:border-primary/20 group-hover:scale-110"
+                              "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border transition-all duration-300 shadow-sm",
+                              isActive ? "bg-white dark:bg-zinc-800 border-primary/20" : "bg-muted/30 group-hover:bg-primary/5 group-hover:border-primary/20 group-hover:scale-105"
                             )}>
-                              {getToolIcon(tool.name, category, "w-6 h-6")}
+                              {getToolIcon(tool.name, category, "w-5 h-5")}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-start justify-between gap-2 mb-1">
-                                <p className="text-sm font-bold leading-tight group-hover:text-primary transition-colors">{tool.label || tool.name}</p>
-                                {isActive && (
+                              <div className="flex items-start justify-between gap-2 mb-0.5">
+                                <p className="text-[13px] font-bold leading-tight group-hover:text-primary transition-colors">{tool.label || tool.name}</p>
+                                {isActive ? (
                                   <Badge className="shrink-0 text-[8px] h-4 bg-primary/10 text-primary border-none font-black px-1.5 uppercase tracking-tighter">ĐÃ THÊM</Badge>
-                                )}
+                                ) : null}
                               </div>
                               <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2 font-medium">
                                 {tool.description}
                               </p>
                             </div>
-
                             {!isActive && (
-                              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
-                                <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                                  <Plus className="w-3.5 h-3.5" />
+                              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-1 group-hover:translate-x-0">
+                                <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                                  <Plus className="w-3 h-3" />
                                 </div>
                               </div>
                             )}
@@ -2666,6 +2765,72 @@ function CreateAgentContent() {
                     <p className="text-sm font-semibold text-muted-foreground">Không tìm thấy tool nào khớp.</p>
                   </div>
                 )}
+
+                {/* MCP Servers section inside tool picker */}
+                <div className="space-y-3 pt-2 border-t border-muted/30">
+                  <div className="flex items-center gap-2 px-1">
+                    <h3 className="text-[11px] font-black uppercase tracking-widest text-muted-foreground/70">MCP Servers</h3>
+                    <Badge variant="outline" className="text-[8px] h-4 px-1.5 opacity-60">{availableMcpServers.length}</Badge>
+                    <Link href="/connection/mcp" onClick={() => setShowAddTool(false)}>
+                      <Button variant="outline" size="sm" className="h-5 px-2 text-[8px] font-black border-emerald-500/40 text-emerald-600 bg-emerald-500/5 hover:bg-emerald-500/10 rounded-md">
+                        QUẢN LÝ
+                      </Button>
+                    </Link>
+                  </div>
+                  {availableMcpServers.length === 0 ? (
+                    <Link href="/connection/mcp" onClick={() => setShowAddTool(false)}>
+                      <div className="p-4 border border-dashed rounded-xl text-center text-xs text-muted-foreground hover:border-emerald-500/30 hover:bg-emerald-500/[0.02] transition-all cursor-pointer flex items-center justify-center gap-2">
+                        <Network className="w-4 h-4 text-emerald-500/50" />
+                        Chưa có MCP Server. Nhấn để thêm máy chủ công cụ ngoài.
+                      </div>
+                    </Link>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {availableMcpServers.map((server) => {
+                        const isChecked = formData.mcp_servers.includes(server.id);
+                        return (
+                          <div
+                            key={server.id}
+                            onClick={() => {
+                              const newMcp = isChecked
+                                ? formData.mcp_servers.filter((id: string) => id !== server.id)
+                                : [...formData.mcp_servers, server.id];
+                              setFormData(prev => ({ ...prev, mcp_servers: newMcp }));
+                              setIsDirty(true);
+                              if (agentId) handleSave({ ...formData, mcp_servers: newMcp });
+                            }}
+                            className={cn(
+                              "p-4 border rounded-xl transition-all duration-200 flex items-start gap-3 group relative overflow-hidden cursor-pointer",
+                              isChecked
+                                ? "bg-emerald-500/[0.03] border-emerald-500/30 shadow-sm"
+                                : "bg-white dark:bg-zinc-900/50 hover:border-emerald-500/40 hover:shadow-lg hover:-translate-y-0.5"
+                            )}
+                          >
+                            <div className={cn(
+                              "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border transition-all duration-300 shadow-sm",
+                              isChecked ? "bg-emerald-500/10 border-emerald-500/20" : "bg-muted/30 group-hover:bg-emerald-500/5 group-hover:border-emerald-500/20"
+                            )}>
+                              <Cpu className={cn("w-5 h-5", isChecked ? "text-emerald-600" : "text-muted-foreground")} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-2 mb-0.5">
+                                <p className="text-[13px] font-bold leading-tight">{server.name}</p>
+                                {isChecked && (
+                                  <Badge className="shrink-0 text-[8px] h-4 bg-emerald-500/10 text-emerald-600 border-none font-black px-1.5">ĐÃ THÊM</Badge>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-muted-foreground font-mono truncate">{server.url}</p>
+                              <div className="flex items-center gap-1 mt-1">
+                                <Badge variant="outline" className="text-[8px] h-3.5 px-1.5 border-emerald-500/30 text-emerald-600 font-black">MCP</Badge>
+                                {!server.is_active && <Badge variant="outline" className="text-[8px] h-3.5 px-1.5 border-amber-500/30 text-amber-600 font-bold">Paused</Badge>}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </CardContent>
             <div className="p-4 border-t bg-muted/10 flex justify-end">
@@ -2685,7 +2850,7 @@ function CreateAgentContent() {
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 animate-in fade-in duration-500">
           <div
             className="absolute inset-0 bg-zinc-950/40 backdrop-blur-md"
-            onClick={() => setShowAddSkill(false)}
+            onClick={() => { setShowAddSkill(false); setSkillSearch(""); }}
           />
           <Card className="w-full max-w-2xl relative z-10 shadow-[0_32px_64px_-12px_rgba(0,0,0,0.2)] border-white/20 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-2xl animate-in zoom-in-95 duration-300 overflow-hidden rounded-[2rem]">
             <CardHeader className="flex flex-row items-center justify-between border-b bg-muted/20">
@@ -2698,8 +2863,17 @@ function CreateAgentContent() {
               </Button>
             </CardHeader>
             <CardContent className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
+              <div className="relative mb-4">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  value={skillSearch}
+                  onChange={(e) => setSkillSearch(e.target.value)}
+                  placeholder="Tìm theo tên hoặc mô tả kỹ năng..."
+                  className="h-11 rounded-2xl pl-11 border-muted-foreground/20 bg-white dark:bg-zinc-900/70"
+                />
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {availableSkills.map((skill) => {
+                {availableSkills.filter(s => !skillSearch || s.name.toLowerCase().includes(skillSearch.toLowerCase()) || s.description?.toLowerCase().includes(skillSearch.toLowerCase())).map((skill) => {
                   const existingSkill = formData.skills.find(s => s.name === skill.name);
                   const isActive = !!existingSkill;
                   return (
@@ -2785,6 +2959,138 @@ function CreateAgentContent() {
         description={confirmConfig.description}
       />
 
+      {/* Connection Setup Dialog — appears when clicking any OAuth-required tool */}
+      <Dialog open={!!pendingToolConnection} onOpenChange={(open) => { if (!open) setPendingToolConnection(null); }}>
+        <DialogContent className="sm:max-w-[480px] rounded-[1.5rem] p-0 overflow-hidden">
+          {pendingToolConnection && (() => {
+            const isFacebook = pendingToolConnection.category === "Facebook Fanpage";
+            const isGmail = pendingToolConnection.category === "Gmail";
+            const isConnected = isFacebook
+              ? !!user?.is_facebook_connected
+              : isGmail
+              ? !!user?.is_google_tool_connected
+              : true;
+            const alreadyAdded = formData.tools.some(t => t.name === pendingToolConnection.name);
+            return (
+              <>
+                <div className={cn(
+                  "p-6 border-b",
+                  isFacebook ? "bg-blue-500/[0.03]" : "bg-red-500/[0.03]"
+                )}>
+                  <div className="flex items-center gap-4">
+                    <div className={cn(
+                      "w-12 h-12 rounded-2xl flex items-center justify-center border shadow-sm shrink-0",
+                      isFacebook ? "bg-blue-500/10 border-blue-500/20" : "bg-red-500/10 border-red-500/20"
+                    )}>
+                      {getToolIcon(pendingToolConnection.name, pendingToolConnection.category, "w-6 h-6")}
+                    </div>
+                    <div>
+                      <DialogTitle className="text-base font-bold">{pendingToolConnection.label || pendingToolConnection.name}</DialogTitle>
+                      <p className="text-[11px] text-muted-foreground font-medium mt-0.5">
+                        {isFacebook ? "Yêu cầu kết nối Meta (Facebook)" : "Yêu cầu kết nối Google (Gmail)"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-6 space-y-4">
+                  {isConnected ? (
+                    <>
+                      <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-emerald-700 dark:text-emerald-400">Đã kết nối</p>
+                          {isFacebook && (
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {selectedFacebookPageName ? `Fanpage: ${selectedFacebookPageName}` : "Chưa chọn Fanpage mặc định"}
+                            </p>
+                          )}
+                          {isGmail && (
+                            <p className="text-xs text-muted-foreground mt-0.5">Tài khoản: {user?.email}</p>
+                          )}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setPendingToolConnection(null);
+                            if (isFacebook) handleConnectFacebook();
+                            else handleConnectGoogle();
+                          }}
+                          className={cn(
+                            "h-7 px-3 text-[10px] font-bold rounded-lg shrink-0",
+                            isFacebook
+                              ? "border-blue-500/30 text-blue-600 hover:bg-blue-500/5"
+                              : "border-red-500/30 text-red-600 hover:bg-red-500/5"
+                          )}
+                        >
+                          Thay đổi
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3 p-4 rounded-xl bg-amber-500/5 border border-amber-500/20">
+                        <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                        <div>
+                          <p className="text-sm font-bold text-amber-700 dark:text-amber-400">Chưa kết nối</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {isFacebook
+                              ? "Cần ủy quyền Facebook để Agent truy cập Fanpage của bạn."
+                              : "Cần ủy quyền Google để Agent truy cập Gmail của bạn."}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        className={cn(
+                          "w-full h-11 rounded-xl font-bold gap-2 text-white shadow-md",
+                          isFacebook ? "bg-blue-600 hover:bg-blue-700 shadow-blue-500/20" : "bg-red-600 hover:bg-red-700 shadow-red-500/20"
+                        )}
+                        onClick={() => {
+                          setPendingToolConnection(null);
+                          if (isFacebook) handleConnectFacebook();
+                          else handleConnectGoogle();
+                        }}
+                      >
+                        <Zap className="w-4 h-4" />
+                        {isFacebook ? "Kết nối với Facebook" : "Kết nối với Google"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-6 pb-6 flex items-center gap-3">
+                  <Button
+                    variant="ghost"
+                    onClick={() => setPendingToolConnection(null)}
+                    className="flex-1 h-10 rounded-xl font-bold text-muted-foreground hover:bg-muted"
+                  >
+                    Đóng
+                  </Button>
+                  {isConnected && (
+                    <Button
+                      className="flex-1 h-10 rounded-xl font-bold bg-primary text-white shadow-sm"
+                      onClick={() => {
+                        if (!alreadyAdded) {
+                          setFormData(prev => ({
+                            ...prev,
+                            tools: [...prev.tools, { name: pendingToolConnection.name, is_active: true }]
+                          }));
+                          addNotification("success", "Đã thêm công cụ", `Đã thêm ${pendingToolConnection.label || pendingToolConnection.name} thành công.`);
+                        }
+                        setPendingToolConnection(null);
+                      }}
+                    >
+                      {alreadyAdded ? "Đã thêm ✓" : "Thêm vào Agent"}
+                    </Button>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={showFacebookPagePicker} onOpenChange={setShowFacebookPagePicker}>
         <DialogContent className="sm:max-w-[620px] rounded-[1.5rem] p-0 overflow-hidden">
           <div className="p-6 border-b bg-blue-500/[0.03]">
@@ -2861,6 +3167,113 @@ function CreateAgentContent() {
           </div>
 
           <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
+
+            {/* Connection section for Gmail tools */}
+            {editingTool && (editingTool.info?.category === "Gmail" || editingTool.name?.toLowerCase().includes("gmail")) && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-3.5 h-3.5 text-red-500" />
+                  <label className="text-[11px] font-bold uppercase tracking-widest text-foreground">Kết nối Google (Gmail)</label>
+                </div>
+                <div className={cn(
+                  "flex items-center justify-between p-4 rounded-xl border",
+                  user?.is_google_tool_connected
+                    ? "bg-red-500/5 border-red-500/20"
+                    : "bg-amber-500/5 border-amber-500/20"
+                )}>
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      "w-9 h-9 rounded-lg flex items-center justify-center border",
+                      user?.is_google_tool_connected ? "bg-red-500/10 border-red-500/20" : "bg-amber-500/10 border-amber-500/20"
+                    )}>
+                      {user?.is_google_tool_connected
+                        ? <CheckCircle2 className="w-4 h-4 text-red-600" />
+                        : <AlertCircle className="w-4 h-4 text-amber-600" />}
+                    </div>
+                    <div>
+                      <p className={cn("text-xs font-bold", user?.is_google_tool_connected ? "text-red-700 dark:text-red-400" : "text-amber-700 dark:text-amber-400")}>
+                        {user?.is_google_tool_connected ? "Đã kết nối" : "Chưa kết nối"}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {user?.is_google_tool_connected
+                          ? `Tài khoản: ${user?.email}`
+                          : "Cần ủy quyền tài khoản Google"}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setShowToolConfig(false);
+                      handleConnectGoogle();
+                    }}
+                    className={cn(
+                      "h-8 px-3 text-[10px] font-bold rounded-lg border shrink-0",
+                      user?.is_google_tool_connected
+                        ? "border-red-500/30 text-red-600 hover:bg-red-500/10"
+                        : "border-amber-500/40 text-amber-700 hover:bg-amber-500/10"
+                    )}
+                  >
+                    {user?.is_google_tool_connected ? "Thay đổi" : "Kết nối"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Connection section for OAuth tools */}
+            {editingTool && (editingTool.info?.category === "Facebook Fanpage" || editingTool.name?.toLowerCase().includes("facebook")) && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-3.5 h-3.5 text-blue-500" />
+                  <label className="text-[11px] font-bold uppercase tracking-widest text-foreground">Kết nối Facebook</label>
+                </div>
+                <div className={cn(
+                  "flex items-center justify-between p-4 rounded-xl border",
+                  user?.is_facebook_connected
+                    ? "bg-blue-500/5 border-blue-500/20"
+                    : "bg-amber-500/5 border-amber-500/20"
+                )}>
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      "w-9 h-9 rounded-lg flex items-center justify-center border",
+                      user?.is_facebook_connected ? "bg-blue-500/10 border-blue-500/20" : "bg-amber-500/10 border-amber-500/20"
+                    )}>
+                      {user?.is_facebook_connected
+                        ? <CheckCircle2 className="w-4 h-4 text-blue-600" />
+                        : <AlertCircle className="w-4 h-4 text-amber-600" />}
+                    </div>
+                    <div>
+                      <p className={cn("text-xs font-bold", user?.is_facebook_connected ? "text-blue-700 dark:text-blue-400" : "text-amber-700 dark:text-amber-400")}>
+                        {user?.is_facebook_connected ? "Đã kết nối" : "Chưa kết nối"}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {user?.is_facebook_connected
+                          ? (selectedFacebookPageName ? `Fanpage: ${selectedFacebookPageName}` : "Chưa chọn Fanpage mặc định")
+                          : "Cần ủy quyền tài khoản Facebook"}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setShowToolConfig(false);
+                      handleConnectFacebook();
+                    }}
+                    className={cn(
+                      "h-8 px-3 text-[10px] font-bold rounded-lg border shrink-0",
+                      user?.is_facebook_connected
+                        ? "border-blue-500/30 text-blue-600 hover:bg-blue-500/10"
+                        : "border-amber-500/40 text-amber-700 hover:bg-amber-500/10"
+                    )}
+                  >
+                    {user?.is_facebook_connected ? "Thay đổi" : "Kết nối"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Tên hiển thị (Label)</label>
               <Input

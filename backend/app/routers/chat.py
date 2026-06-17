@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+﻿from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.base import get_db
 from app.core.security import get_current_user
@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional
 
 from app.repositories.agent_repo import AgentRepository
-from app.services.chat_service import ChatService
+from app.services.chat.chat_service import ChatService
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -24,6 +24,7 @@ class ChatRequest(BaseModel):
     thread_id: Optional[str] = None
     history: List[Dict[str, str]] = []
     command: Optional[Dict] = None
+    is_test: Optional[bool] = False
 
 @router.post("/")
 async def chat(
@@ -37,7 +38,8 @@ async def chat(
         current_user.id, 
         request.message,
         thread_id=request.thread_id,
-        command=request.command
+        command=request.command,
+        is_test=request.is_test
     )
 
 @router.post("/stream")
@@ -55,7 +57,8 @@ async def chat_stream(
         current_user.id,
         request.message,
         thread_id=request.thread_id,
-        command=request.command
+        command=request.command,
+        is_test=request.is_test
     )
 
 @router.get("/conversations")

@@ -14,15 +14,21 @@ import {
   ThumbsUp,
   ThumbsDown,
   Copy,
-  Activity
+  Activity,
+  MessageSquare,
+  Clock,
+  Database,
+  Wrench
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { fetchWithAuth } from "@/lib/api";
 import { useNotifications } from "@/hooks/use-notifications";
+import { useAuth } from "@/hooks/use-auth";
 import { AuditModal } from "@/components/chat/AuditModal";
 import { AgentArtifact, ArtifactRenderer } from "@/components/shared/ArtifactRenderer";
+import { PlaygroundInspector } from "@/components/agents/PlaygroundInspector";
 
 interface Message {
   role: "user" | "assistant";
@@ -76,6 +82,12 @@ interface ChatInterfaceProps {
   isEmbed?: boolean;
   onClose?: () => void;
   showAudit?: boolean;
+  isTest?: boolean;
+  showInspector?: boolean;
+  setShowInspector?: (show: boolean) => void;
+  inspectorTab?: "trace" | "rag" | "tool";
+  setInspectorTab?: (tab: "trace" | "rag" | "tool") => void;
+  previewWidth?: number;
 }
 
 export function ChatInterface({ 
@@ -85,11 +97,18 @@ export function ChatInterface({
   onThreadCreated, 
   isEmbed = false, 
   onClose,
-  showAudit = true 
+  showAudit = true,
+  isTest = false,
+  showInspector: propShowInspector,
+  setShowInspector: propSetShowInspector,
+  inspectorTab: propInspectorTab,
+  setInspectorTab: propSetInspectorTab,
+  previewWidth
 }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(threadId || null);
   const { addNotification } = useNotifications();
+  const { user } = useAuth();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
@@ -100,6 +119,27 @@ export function ChatInterface({
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [activeMessageIndex, setActiveMessageIndex] = useState<number | null>(null);
   const [agentConfig, setAgentConfig] = useState<any>(null);
+  
+  // Local state fallbacks if props are not provided
+  const [localShowInspector, setLocalShowInspector] = useState(false);
+  const [localInspectorTab, setLocalInspectorTab] = useState<"trace" | "rag" | "tool">("trace");
+
+  const showInspector = propShowInspector !== undefined ? propShowInspector : localShowInspector;
+  const setShowInspector = propSetShowInspector !== undefined ? propSetShowInspector : setLocalShowInspector;
+  const inspectorTab = propInspectorTab !== undefined ? propInspectorTab : localInspectorTab;
+  const setInspectorTab = propSetInspectorTab !== undefined ? propSetInspectorTab : setLocalInspectorTab;
+
+  const activeTools = Array.isArray(agentConfig?.tools)
+    ? (agentConfig.tools.map((t: any) => {
+        if (typeof t === "string") return t;
+        if (t && typeof t === "object") {
+          if (t.is_active || t.is_active === undefined) {
+            return t.name;
+          }
+        }
+        return null;
+      }).filter(Boolean) as string[])
+    : [];
 
   useEffect(() => {
     const fetchAgentConfig = async () => {
@@ -187,14 +227,20 @@ export function ChatInterface({
     if (!agentId) return;
 
     if (!command) {
-      setMessages(prev => [...prev, { role: "user", content }]);
-      setMessages(prev => [...prev, { role: "assistant", content: "", done: false, status: "" }]);
+      setMessages(prev => [...prev, { role: "user" as const, content }]);
+      setMessages(prev => {
+        const newMsgs: Message[] = [...prev, { role: "assistant" as const, content: "", done: false, status: "" }];
+        setActiveMessageIndex(newMsgs.length - 1);
+        return newMsgs;
+      });
+
     } else {
       setMessages(prev => {
         const newMsgs = [...prev];
         const lastIdx = newMsgs.length - 1;
         if (lastIdx >= 0) {
           newMsgs[lastIdx] = { ...newMsgs[lastIdx], done: false, interrupt: null, status: "Đang phân tích..." };
+          setActiveMessageIndex(lastIdx);
         }
         return newMsgs;
       });
@@ -208,7 +254,8 @@ export function ChatInterface({
           agent_id: agentId,
           message: content,
           thread_id: currentThreadId,
-          command: command
+          command: command,
+          is_test: isTest
         })
       });
 
@@ -353,6 +400,7 @@ export function ChatInterface({
           </div>
 
           <div className="flex items-center gap-2 relative z-30">
+
             {messages.length > 1 && (
               <Button
                 variant="ghost"
@@ -383,373 +431,429 @@ export function ChatInterface({
         </div>
       )}
 
-      {/* Messages Area */}
-      <div
-        ref={chatContainerRef}
-        onScroll={handleScroll}
-        className={cn(
-          "flex-1 overflow-y-auto custom-scrollbar transition-all duration-500 z-10",
-          messages.length <= 1 ? "opacity-0 invisible" : "opacity-100 visible py-10 px-6 space-y-8",
-          isEmbed && "mr-1"
-        )}
-      >
-        <AnimatePresence initial={false}>
-          {messages.map((msg, idx) => (
-            <motion.div
-              key={idx}
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ type: "spring", stiffness: 200, damping: 20 }}
+      {/* Tabs Sub-Header Bar (New Row) */}
+      {isEmbed && (
+        <div className="flex items-center justify-center py-2 px-4 border-b bg-white/50 dark:bg-zinc-950/50 backdrop-blur-md z-20 shrink-0 border-zinc-200/30 dark:border-white/[0.05]">
+          <div className="flex items-center gap-1 p-0.5 bg-zinc-100 dark:bg-zinc-950 rounded-xl border w-full max-w-md">
+            <button
+              onClick={() => setShowInspector(false)}
               className={cn(
-                "flex gap-4 max-w-3xl mx-auto items-start",
-                msg.role === "user" ? "flex-row-reverse" : "flex-row"
+                "flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5",
+                !showInspector
+                  ? "bg-white dark:bg-zinc-800 text-primary shadow-sm border border-zinc-200/30 dark:border-white/[0.05]"
+                  : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {/* Avatar Core with subtle glows */}
-              <div className="shrink-0 pt-0.5">
-                <div className={cn(
-                  "w-8 h-8 rounded-xl flex items-center justify-center shadow-md relative overflow-hidden border transition-all duration-300 hover:scale-105",
-                  msg.role === "user"
-                    ? "bg-gradient-to-br from-zinc-800 to-zinc-950 dark:from-zinc-100 dark:to-zinc-200 text-white dark:text-zinc-950 border-zinc-700/20 dark:border-zinc-300/20 shadow-md"
-                    : "bg-white/70 dark:bg-zinc-900/70 border-primary/20 dark:border-primary/10 shadow-inner"
-                )}>
-                  {msg.role === "user" ? (
-                    <UserIcon className="w-4 h-4" />
-                  ) : (
-                    <>
-                      <div className="absolute inset-0 bg-gradient-to-tr from-primary/20 to-teal-500/10 opacity-70 animate-pulse" />
-                      <div className="absolute -inset-1 bg-gradient-to-r from-primary/30 to-emerald-500/30 rounded-full blur-[4px] animate-spin" style={{ animationDuration: "12s" }} />
-                      <Bot className="w-4 h-4 text-primary relative z-10" />
-                    </>
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span className={cn(previewWidth && previewWidth < 450 && "hidden")}>Chat</span>
+            </button>
+            {[
+              { id: "trace", label: "Trace Log", icon: Clock },
+              { id: "rag", label: "Test RAG", icon: Database },
+              { id: "tool", label: "Test Tool", icon: Wrench },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setShowInspector(true);
+                  setInspectorTab(tab.id as any);
+                }}
+                className={cn(
+                  "flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5",
+                  showInspector && inspectorTab === tab.id
+                    ? "bg-white dark:bg-zinc-800 text-primary shadow-sm border border-zinc-200/30 dark:border-white/[0.05]"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <tab.icon className="w-3.5 h-3.5" />
+                <span className={cn(previewWidth && previewWidth < 450 && "hidden")}>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 flex flex-row overflow-hidden relative z-10 w-full">
+        {/* Left Chat Screen */}
+        <div className={cn("flex-1 flex flex-col h-full overflow-hidden relative", isEmbed && showInspector && "hidden")}>
+          {/* Messages Area */}
+          <div
+            ref={chatContainerRef}
+            onScroll={handleScroll}
+            className={cn(
+              "flex-1 overflow-y-auto custom-scrollbar transition-all duration-500 z-10",
+              messages.length <= 1 ? "opacity-0 invisible" : "opacity-100 visible py-10 px-6 space-y-8",
+              isEmbed && "mr-1"
+            )}
+          >
+            <AnimatePresence initial={false}>
+              {messages.map((msg, idx) => (
+                <motion.div
+                  key={idx}
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                  className={cn(
+                    "flex gap-4 max-w-3xl mx-auto items-start",
+                    msg.role === "user" ? "flex-row-reverse" : "flex-row"
                   )}
-                </div>
-              </div>
-
-              {/* Message Bubble Column */}
-              <div className={cn(
-                "flex flex-col space-y-2 max-w-[85%]",
-                msg.role === "user" ? "items-end text-right" : "items-start text-left"
-              )}>
-                {msg.status && !msg.done && (
-                  <div className="flex items-center gap-2 text-[9px] text-primary font-black tracking-widest uppercase opacity-80 mb-1 ml-1 animate-pulse">
-                    <span className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(22,163,74,0.5)]" />
-                    {msg.status}
+                >
+                  {/* Avatar Core with subtle glows */}
+                  <div className="shrink-0 pt-0.5">
+                    <div className={cn(
+                      "w-8 h-8 rounded-xl flex items-center justify-center shadow-md relative overflow-hidden border transition-all duration-300 hover:scale-105",
+                      msg.role === "user"
+                        ? "bg-gradient-to-br from-zinc-800 to-zinc-950 dark:from-zinc-100 dark:to-zinc-200 text-white dark:text-zinc-950 border-zinc-700/20 dark:border-zinc-300/20 shadow-md"
+                        : "bg-white/70 dark:bg-zinc-900/70 border-primary/20 dark:border-primary/10 shadow-inner"
+                    )}>
+                      {msg.role === "user" ? (
+                        <UserIcon className="w-4 h-4" />
+                      ) : (
+                        <>
+                          <div className="absolute inset-0 bg-gradient-to-tr from-primary/20 to-teal-500/10 opacity-70 animate-pulse" />
+                          <div className="absolute -inset-1 bg-gradient-to-r from-primary/30 to-emerald-500/30 rounded-full blur-[4px] animate-spin" style={{ animationDuration: "12s" }} />
+                          <Bot className="w-4 h-4 text-primary relative z-10" />
+                        </>
+                      )}
+                    </div>
                   </div>
-                )}
 
-                {msg.thinking && (
-                  <ThinkingBlock content={msg.thinking} isDone={msg.done} />
-                )}
-
-                {msg.content && (
+                  {/* Message Bubble Column */}
                   <div className={cn(
-                    "p-4 rounded-[1.25rem] text-[13px] leading-relaxed shadow-[0_4px_12px_rgba(0,0,0,0.01)] dark:shadow-none relative",
-                    msg.role === "user"
-                      ? "bg-zinc-900 dark:bg-zinc-100 text-zinc-100 dark:text-zinc-900 rounded-tr-none border border-zinc-800 dark:border-zinc-200 shadow-md"
-                      : "bg-white/60 dark:bg-zinc-900/20 border border-zinc-200/50 dark:border-white/[0.04] backdrop-blur-xl rounded-tl-none relative overflow-hidden group"
+                    "flex flex-col space-y-2 max-w-[85%]",
+                    msg.role === "user" ? "items-end text-right" : "items-start text-left"
                   )}>
-                    {msg.role === "assistant" && (
-                      <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-gradient-to-b from-primary to-emerald-600 opacity-60 rounded-l" />
+                    {msg.status && !msg.done && (
+                      <div className="flex items-center gap-2 text-[9px] text-primary font-black tracking-widest uppercase opacity-80 mb-1 ml-1 animate-pulse">
+                        <span className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(22,163,74,0.5)]" />
+                        {msg.status}
+                      </div>
                     )}
 
-                    <div className="prose dark:prose-invert max-w-none prose-sm prose-p:leading-relaxed prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-white/5">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {msg.content || ""}
-                      </ReactMarkdown>
-                    </div>
-                    
-                    {msg.role === "assistant" && msg.done && idx > 0 && (
-                      <div className="mt-4 pt-3 border-t border-zinc-200/30 dark:border-white/[0.04] flex items-center justify-between gap-4">
-                        {/* Feedbacks Group */}
-                        <div className="flex items-center gap-0.5">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-zinc-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
-                            title="Hữu ích"
-                          >
-                            <ThumbsUp className="w-3 h-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-zinc-400 hover:text-destructive hover:bg-destructive/5 rounded-lg transition-all"
-                            title="Không hữu ích"
-                          >
-                            <ThumbsDown className="w-3 h-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-zinc-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
-                            title="Thử lại"
-                            onClick={() => handleChat(messages[idx-1].content || "")}
-                          >
-                            <RotateCcw className="w-3 h-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-zinc-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
-                            title="Sao chép"
-                            onClick={() => {
-                              navigator.clipboard.writeText(msg.content || "");
-                              addNotification("success", "Đã sao chép", "Đã lưu vào bộ nhớ tạm.");
-                            }}
-                          >
-                            <Copy className="w-3 h-3" />
-                          </Button>
-                        </div>
+                    {msg.thinking && (
+                      <ThinkingBlock content={msg.thinking} isDone={msg.done} />
+                    )}
 
-                        {/* Audit Log Trigger */}
-                        {showAudit && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 px-2 text-[9px] font-black uppercase tracking-wider text-zinc-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all gap-1.5"
-                            onClick={() => {
-                              setActiveMessageIndex(idx);
-                              setIsAuditOpen(true);
-                            }}
-                          >
-                            <Activity className="w-3 h-3 text-primary" />
-                            Console log
-                          </Button>
+                    {msg.content && (
+                      <div className={cn(
+                        "p-4 rounded-[1.25rem] text-[13px] leading-relaxed shadow-[0_4px_12px_rgba(0,0,0,0.01)] dark:shadow-none relative",
+                        msg.role === "user"
+                          ? "bg-zinc-900 dark:bg-zinc-100 text-zinc-100 dark:text-zinc-900 rounded-tr-none border border-zinc-800 dark:border-zinc-200 shadow-md"
+                          : "bg-white/60 dark:bg-zinc-900/20 border border-zinc-200/50 dark:border-white/[0.04] backdrop-blur-xl rounded-tl-none relative overflow-hidden group"
+                      )}>
+                        {msg.role === "assistant" && (
+                          <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-gradient-to-b from-primary to-emerald-600 opacity-60 rounded-l" />
+                        )}
+
+                        <div className="prose dark:prose-invert max-w-none prose-sm prose-p:leading-relaxed prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-white/5">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {msg.content || ""}
+                          </ReactMarkdown>
+                        </div>
+                        
+                        {msg.role === "assistant" && msg.done && idx > 0 && (
+                          <div className="mt-4 pt-3 border-t border-zinc-200/30 dark:border-white/[0.04] flex items-center justify-between gap-4">
+                            {/* Feedbacks Group */}
+                            <div className="flex items-center gap-0.5">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-zinc-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
+                                title="Hữu ích"
+                              >
+                                <ThumbsUp className="w-3 h-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-zinc-400 hover:text-destructive hover:bg-destructive/5 rounded-lg transition-all"
+                                title="Không hữu ích"
+                              >
+                                <ThumbsDown className="w-3 h-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-zinc-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
+                                title="Thử lại"
+                                onClick={() => handleChat(messages[idx-1].content || "")}
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-zinc-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all"
+                                title="Sao chép"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(msg.content || "");
+                                  addNotification("success", "Đã sao chép", "Đã lưu vào bộ nhớ tạm.");
+                                }}
+                              >
+                                <Copy className="w-3 h-3" />
+                              </Button>
+                            </div>
+
+                            {/* Audit Log Trigger */}
+                            {showAudit && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-[9px] font-black uppercase tracking-wider text-zinc-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-all gap-1.5"
+                                onClick={() => {
+                                  setActiveMessageIndex(idx);
+                                  setIsAuditOpen(true);
+                                }}
+                              >
+                                <Activity className="w-3 h-3 text-primary" />
+                                Console log
+                              </Button>
+                            )}
+                          </div>
                         )}
                       </div>
                     )}
-                  </div>
-                )}
 
-                {msg.artifacts && msg.artifacts.length > 0 && (
-                  <div className="w-full space-y-3 mt-1 animate-in fade-in duration-300">
-                    {msg.artifacts.map((artifact) => (
-                      <ArtifactRenderer key={artifact.id} artifact={artifact} />
-                    ))}
-                  </div>
-                )}
-
-                {msg.interrupt && (
-                  <div className="mt-4 p-5 rounded-2xl border border-primary/10 bg-primary/5 space-y-4 shadow-sm max-w-xs animate-in zoom-in-95 duration-300">
-                    <div className="flex items-center gap-3">
-                      <Sparkles className="w-4 h-4 text-primary animate-spin" style={{ animationDuration: "3s" }} />
-                      <p className="text-[11px] font-extrabold text-foreground/80">{msg.interrupt.message || "Cần phê duyệt hành động"}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button size="sm" onClick={() => handleResume(true)} className="flex-1 rounded-xl h-8 text-[11px] font-extrabold bg-primary text-white shadow-lg shadow-primary/20 border-none">Đồng ý</Button>
-                      <Button size="sm" variant="outline" onClick={() => handleResume(false)} className="flex-1 rounded-xl h-8 text-[11px] font-extrabold border-muted-foreground/20 hover:bg-secondary">Từ chối</Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          ))}
-          <div ref={messagesEndRef} />
-        </AnimatePresence>
-      </div>
-
-      {/* Dynamic Input Deck Area */}
-      <div className={cn(
-        "transition-all duration-700 px-6 z-10 shrink-0",
-        messages.length <= 1
-          ? "absolute inset-0 flex flex-col items-center justify-center bg-transparent"
-          : "py-6 border-t bg-white/70 dark:bg-zinc-950/70 backdrop-blur-2xl border-zinc-200/40 dark:border-white/[0.04]"
-      )}>
-        {messages.length <= 1 && (
-          <motion.div
-            initial={{ opacity: 0, y: 25 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ type: "spring", stiffness: 100, damping: 15 }}
-            className="text-center mb-6 space-y-4 px-4 w-full"
-          >
-            {isEmbed ? (
-              // --- DEVELOPER SANDBOX PREVIEW WELCOME SCREEN ---
-              <div className="max-w-2xl mx-auto space-y-6">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary/15 to-emerald-500/5 flex items-center justify-center border border-primary/20 shadow-xl mx-auto relative overflow-hidden group">
-                  <div className="absolute inset-0 bg-gradient-to-tr from-primary/20 to-teal-500/10 opacity-30 animate-pulse" />
-                  <Activity className="w-6 h-6 text-primary animate-pulse" />
-                </div>
-                
-                <div className="space-y-2">
-                  <h1 className="text-2xl font-black tracking-tight text-foreground/90 uppercase bg-gradient-to-r from-primary to-emerald-600 dark:from-primary dark:to-emerald-500 bg-clip-text text-transparent">
-                    Agent Sandbox Playground
-                  </h1>
-                  <p className="text-muted-foreground/60 text-[9px] font-black leading-relaxed uppercase tracking-widest max-w-md mx-auto">
-                    Khu vực thử nghiệm cấu hình. Kiểm thử ngay lập tức các thiết lập Prompt, RAG File và API Tools của bạn.
-                  </p>
-                </div>
-
-                {/* Glassmorphic Diagnostics Active Config Card HUD */}
-                <div className="p-4 rounded-2xl border border-zinc-200/50 dark:border-white/[0.04] bg-white/40 dark:bg-zinc-900/10 backdrop-blur-xl grid grid-cols-3 gap-4 text-left shadow-sm">
-                  <div className="space-y-1">
-                    <span className="text-[8px] font-black text-muted-foreground/60 uppercase tracking-widest block">Mô hình</span>
-                    <p className="text-xs font-bold text-foreground/80 truncate leading-snug">
-                      {agentConfig?.model_name ? (
-                        <span className="text-primary font-black uppercase text-[10px]">{agentConfig.model_name}</span>
-                      ) : (
-                        <span className="text-muted-foreground/40 font-medium">Sẵn sàng</span>
-                      )}
-                    </p>
-                  </div>
-                  <div className="space-y-1 border-l border-zinc-200/40 dark:border-white/[0.04] pl-4">
-                    <span className="text-[8px] font-black text-muted-foreground/60 uppercase tracking-widest block">Chỉ dẫn Prompt</span>
-                    <p className="text-xs font-bold text-foreground/80 truncate leading-snug">
-                      {agentConfig?.system_prompt ? (
-                        <span>{agentConfig.system_prompt.length} ký tự</span>
-                      ) : (
-                        <span className="text-muted-foreground/40 font-medium">Hoạt động</span>
-                      )}
-                    </p>
-                  </div>
-                  <div className="space-y-1 border-l border-zinc-200/40 dark:border-white/[0.04] pl-4">
-                    <span className="text-[8px] font-black text-muted-foreground/60 uppercase tracking-widest block">Công cụ kết nối</span>
-                    <p className="text-xs font-bold text-foreground/80 truncate leading-snug">
-                      {agentConfig?.tools ? (
-                        <span className="text-primary">{agentConfig.tools.length} active</span>
-                      ) : (
-                        <span className="text-muted-foreground/40 font-medium">Tích hợp</span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Setup Testing Prompts Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full mt-4">
-                  {[
-                    { text: "Hãy giới thiệu ngắn về vai trò và các chỉ dẫn nhiệm vụ mà bạn nhận được.", label: "Test Prompt", icon: Sparkles, desc: "Kiểm tra Persona chỉ dẫn" },
-                    { text: "Kiểm tra hệ thống tri thức RAG: Tóm tắt thông tin từ các tệp tài liệu đã tải lên.", label: "Test RAG", icon: Activity, desc: "Kiểm tra dữ liệu huấn luyện" },
-                    { text: "Kích hoạt thử nghiệm các công cụ đã tích hợp trong Agent để kiểm tra tham số.", label: "Test Tool", icon: Bot, desc: "Thử nghiệm API & Tooling" }
-                  ].map((s, i) => (
-                    <button
-                      key={i}
-                      disabled={!agentId}
-                      onClick={() => {
-                        if (agentId) {
-                          setInputValue(s.text);
-                          handleChat(s.text);
-                          setInputValue("");
-                        }
-                      }}
-                      className="group text-left p-4 rounded-2xl border border-zinc-200/50 dark:border-white/[0.04] bg-white/40 dark:bg-zinc-900/10 hover:bg-white/80 dark:hover:bg-zinc-900/40 hover:border-primary/30 dark:hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 backdrop-blur-xl relative overflow-hidden active:scale-[0.98] disabled:opacity-50"
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                      <div className="flex items-center gap-2 mb-2">
-                        <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/20 text-primary transition-transform duration-300 group-hover:scale-110">
-                          <s.icon className="w-3.5 h-3.5" />
-                        </div>
-                        <span className="text-[9px] font-black uppercase tracking-widest text-primary leading-none">{s.label}</span>
+                    {msg.artifacts && msg.artifacts.length > 0 && (
+                      <div className="w-full space-y-3 mt-1 animate-in fade-in duration-300">
+                        {msg.artifacts.map((artifact) => (
+                          <ArtifactRenderer key={artifact.id} artifact={artifact} />
+                        ))}
                       </div>
-                      <p className="text-xs font-bold text-foreground/80 group-hover:text-primary transition-colors line-clamp-1 mb-1 leading-snug">{s.text}</p>
-                      <p className="text-[10px] text-muted-foreground/60 leading-normal font-medium">{s.desc}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              // --- END-USER STANDARD CHAT WELCOME SCREEN ---
-              <>
-                {/* Pulsating Holographic AI Orb Core */}
-                <div className="w-16 h-16 rounded-[1.5rem] bg-gradient-to-br from-primary/10 to-emerald-500/5 dark:from-primary/5 dark:to-emerald-500/0 flex items-center justify-center border border-primary/20 shadow-2xl mx-auto mb-4 relative overflow-hidden group hover:scale-105 transition-transform duration-300">
-                  <div className="absolute inset-0 bg-gradient-to-tr from-primary/20 to-teal-500/10 opacity-30 animate-pulse" />
-                  <div className="absolute -inset-2 bg-gradient-to-tr from-primary/10 to-teal-500/10 rounded-full blur-[8px] animate-spin" style={{ animationDuration: "15s" }} />
-                  <Bot className="w-8 h-8 text-primary relative z-10" />
-                </div>
-                <h1 className="text-3xl font-black tracking-tight text-foreground/90 uppercase bg-gradient-to-r from-primary to-emerald-600 dark:from-primary dark:to-emerald-500 bg-clip-text text-transparent">
-                  {agentName || "AI Assistant"}
-                </h1>
-                <p className="text-muted-foreground/60 text-[10px] font-black max-w-sm mx-auto leading-relaxed uppercase tracking-widest">
-                  Hệ thống trợ lý ảo chuyên dụng. Hãy chọn hành động hoặc nhập yêu cầu.
-                </p>
+                    )}
 
-                {/* Quick Action Prompt Starters Chips Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full max-w-2xl mx-auto mt-8 px-4">
-                  {[
-                    { text: "Tóm tắt & phân tích dữ liệu tệp này", label: "Phân Tích", icon: Sparkles, desc: "Trích xuất thông tin trọng tâm" },
-                    { text: "Viết kịch bản tự động hóa quy trình", label: "Quy Trình", icon: Activity, desc: "Tạo các webhook trigger" },
-                    { text: "Cấu hình tham số và kiểm tra công cụ", label: "Thiết Lập", icon: Bot, desc: "Tích hợp và kiểm thử API" }
-                  ].map((s, i) => (
-                    <button
-                      key={i}
-                      disabled={!agentId}
-                      onClick={() => {
-                        if (agentId) {
-                          setInputValue(s.text);
-                          handleChat(s.text);
-                          setInputValue("");
-                        }
-                      }}
-                      className="group text-left p-4 rounded-2xl border border-zinc-200/50 dark:border-white/[0.04] bg-white/40 dark:bg-zinc-900/10 hover:bg-white/80 dark:hover:bg-zinc-900/40 hover:border-primary/30 dark:hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 backdrop-blur-xl relative overflow-hidden active:scale-[0.98] disabled:opacity-50"
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                      <div className="flex items-center gap-2 mb-2">
-                        <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/20 text-primary transition-transform duration-300 group-hover:scale-110">
-                          <s.icon className="w-3.5 h-3.5" />
+                    {msg.interrupt && (
+                      <div className="mt-4 p-5 rounded-2xl border border-primary/10 bg-primary/5 space-y-4 shadow-sm max-w-xs animate-in zoom-in-95 duration-300">
+                        <div className="flex items-center gap-3">
+                          <Sparkles className="w-4 h-4 text-primary animate-spin" style={{ animationDuration: "3s" }} />
+                          <p className="text-[11px] font-extrabold text-foreground/80">{msg.interrupt.message || "Cần phê duyệt hành động"}</p>
                         </div>
-                        <span className="text-[9px] font-black uppercase tracking-widest text-primary leading-none">{s.label}</span>
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => handleResume(true)} className="flex-1 rounded-xl h-8 text-[11px] font-extrabold bg-primary text-white shadow-lg shadow-primary/20 border-none">Đồng ý</Button>
+                          <Button size="sm" variant="outline" onClick={() => handleResume(false)} className="flex-1 rounded-xl h-8 text-[11px] font-extrabold border-muted-foreground/20 hover:bg-secondary">Từ chối</Button>
+                        </div>
                       </div>
-                      <p className="text-xs font-bold text-foreground/80 group-hover:text-primary transition-colors line-clamp-1 mb-1 leading-snug">{s.text}</p>
-                      <p className="text-[10px] text-muted-foreground/60 leading-normal font-medium">{s.desc}</p>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </motion.div>
-        )}
+                    )}
+                  </div>
+                </motion.div>
+              ))}
+              <div ref={messagesEndRef} />
+            </AnimatePresence>
+          </div>
 
-        <div className={cn(
-          "relative w-full transition-all duration-500",
-          messages.length <= 1 ? "max-w-xl" : "max-w-3xl mx-auto"
-        )}>
+          {/* Dynamic Input Deck Area */}
           <div className={cn(
-            "relative flex flex-col w-full bg-white/70 dark:bg-zinc-900/60 backdrop-blur-2xl border border-zinc-200/50 dark:border-white/[0.05] rounded-[1.5rem] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.05)] dark:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.3)] transition-all focus-within:ring-4 focus-within:ring-primary/5 focus-within:border-primary/40 p-1.5",
-            !agentId && "opacity-50 grayscale cursor-not-allowed"
+            "transition-all duration-700 px-6 z-10 shrink-0",
+            messages.length <= 1
+              ? "absolute inset-0 flex flex-col items-center justify-center bg-transparent"
+              : "py-6 border-t bg-white/70 dark:bg-zinc-950/70 backdrop-blur-2xl border-zinc-200/40 dark:border-white/[0.04]"
           )}>
-            <textarea
-              ref={textareaRef}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  if (inputValue.trim() && agentId) {
-                    handleChat(inputValue);
-                    setInputValue("");
-                  }
-                }
-              }}
-              placeholder="Gửi tin nhắn..."
-              disabled={!agentId}
-              className="w-full bg-transparent border-none focus:ring-0 py-3 px-4 pr-12 min-h-[50px] max-h-48 resize-none text-sm font-semibold custom-scrollbar text-foreground placeholder:text-muted-foreground/40 focus:outline-none"
-            />
-            
-            <div className="absolute right-3.5 bottom-3.5 flex items-center gap-2">
-              {isLoadingHistory && <Loader2 className="w-4 h-4 text-primary animate-spin" />}
-              <button
-                disabled={!inputValue.trim() || !agentId}
-                onClick={() => {
-                  if (inputValue.trim() && agentId) {
-                    handleChat(inputValue);
-                    setInputValue("");
-                  }
-                }}
-                className={cn(
-                  "w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-300 active:scale-95 border-none outline-none",
-                  inputValue.trim() && agentId
-                    ? "bg-gradient-to-r from-primary to-emerald-600 dark:from-primary dark:to-emerald-500 text-white shadow-lg shadow-primary/25 cursor-pointer"
-                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 cursor-not-allowed"
-                )}
+            {messages.length <= 1 && (
+              <motion.div
+                initial={{ opacity: 0, y: 25 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ type: "spring", stiffness: 100, damping: 15 }}
+                className="text-center mb-6 space-y-4 px-4 w-full"
               >
-                <ArrowUp className="w-4.5 h-4.5 stroke-[3] text-white dark:text-white" />
-              </button>
+                {isEmbed ? (
+                  // --- DEVELOPER SANDBOX PREVIEW WELCOME SCREEN ---
+                  <div className="max-w-2xl mx-auto space-y-6">
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary/15 to-emerald-500/5 flex items-center justify-center border border-primary/20 shadow-xl mx-auto relative overflow-hidden group">
+                      <div className="absolute inset-0 bg-gradient-to-tr from-primary/20 to-teal-500/10 opacity-30 animate-pulse" />
+                      <Activity className="w-6 h-6 text-primary animate-pulse" />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <h1 className="text-2xl font-black tracking-tight text-foreground/90 uppercase bg-gradient-to-r from-primary to-emerald-600 dark:from-primary dark:to-emerald-500 bg-clip-text text-transparent">
+                        Agent Sandbox Playground
+                      </h1>
+                      <p className="text-muted-foreground/60 text-[9px] font-black leading-relaxed uppercase tracking-widest max-w-md mx-auto">
+                        Khu vực thử nghiệm cấu hình. Kiểm thử ngay lập tức các thiết lập Prompt, RAG File và API Tools của bạn.
+                      </p>
+                    </div>
+
+                    {/* Glassmorphic Diagnostics Active Config Card HUD */}
+                    <div className="p-4 rounded-2xl border border-zinc-200/50 dark:border-white/[0.04] bg-white/40 dark:bg-zinc-900/10 backdrop-blur-xl grid grid-cols-3 gap-4 text-left shadow-sm">
+                      <div className="space-y-1">
+                        <span className="text-[8px] font-black text-muted-foreground/60 uppercase tracking-widest block">Mô hình</span>
+                        <p className="text-xs font-bold text-foreground/80 truncate leading-snug">
+                          {agentConfig?.model_name ? (
+                            <span className="text-primary font-black uppercase text-[10px]">{agentConfig.model_name}</span>
+                          ) : (
+                            <span className="text-muted-foreground/40 font-medium">Sẵn sàng</span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="space-y-1 border-l border-zinc-200/40 dark:border-white/[0.04] pl-4">
+                        <span className="text-[8px] font-black text-muted-foreground/60 uppercase tracking-widest block">Chỉ dẫn Prompt</span>
+                        <p className="text-xs font-bold text-foreground/80 truncate leading-snug">
+                          {agentConfig?.system_prompt ? (
+                            <span>{agentConfig.system_prompt.length} ký tự</span>
+                          ) : (
+                            <span className="text-muted-foreground/40 font-medium">Hoạt động</span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="space-y-1 border-l border-zinc-200/40 dark:border-white/[0.04] pl-4">
+                        <span className="text-[8px] font-black text-muted-foreground/60 uppercase tracking-widest block">Công cụ kết nối</span>
+                        <p className="text-xs font-bold text-foreground/80 truncate leading-snug">
+                          {agentConfig?.tools ? (
+                            <span className="text-primary">{agentConfig.tools.length} active</span>
+                          ) : (
+                            <span className="text-muted-foreground/40 font-medium">Tích hợp</span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Setup Testing Prompts Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full mt-4">
+                      {[
+                        { text: "Hãy giới thiệu ngắn về vai trò và các chỉ dẫn nhiệm vụ mà bạn nhận được.", label: "Test Prompt", icon: Sparkles, desc: "Kiểm tra Persona chỉ dẫn" },
+                        { text: "Kiểm tra hệ thống tri thức RAG: Tóm tắt thông tin từ các tệp tài liệu đã tải lên.", label: "Test RAG", icon: Activity, desc: "Kiểm tra dữ liệu huấn luyện" },
+                        { text: "Kích hoạt thử nghiệm các công cụ đã tích hợp trong Agent để kiểm tra tham số.", label: "Test Tool", icon: Bot, desc: "Thử nghiệm API & Tooling" }
+                      ].map((s, i) => (
+                        <button
+                          key={i}
+                          disabled={!agentId}
+                          onClick={() => {
+                            if (agentId) {
+                              setInputValue(s.text);
+                              handleChat(s.text);
+                              setInputValue("");
+                            }
+                          }}
+                          className="group text-left p-4 rounded-2xl border border-zinc-200/50 dark:border-white/[0.04] bg-white/40 dark:bg-zinc-900/10 hover:bg-white/80 dark:hover:bg-zinc-900/40 hover:border-primary/30 dark:hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 backdrop-blur-xl relative overflow-hidden active:scale-[0.98] disabled:opacity-50"
+                        >
+                          <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/20 text-primary transition-transform duration-300 group-hover:scale-110">
+                              <s.icon className="w-3.5 h-3.5" />
+                            </div>
+                            <span className="text-[9px] font-black uppercase tracking-widest text-primary leading-none">{s.label}</span>
+                          </div>
+                          <p className="text-xs font-bold text-foreground/80 group-hover:text-primary transition-colors line-clamp-1 mb-1 leading-snug">{s.text}</p>
+                          <p className="text-[10px] text-muted-foreground/60 leading-normal font-medium">{s.desc}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  // --- END-USER STANDARD CHAT WELCOME SCREEN ---
+                  <>
+                    {/* Pulsating Holographic AI Orb Core */}
+                   
+                    <p className="text-muted-foreground/60 text-[10px] font-black max-w-sm mx-auto leading-relaxed uppercase tracking-widest">
+                      Rất vui được trò chuyện với bạn {user?.full_name || "bạn"}
+                    </p>
+
+                    {/* Quick Action Prompt Starters Chips Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full max-w-2xl mx-auto mt-8 px-4">
+                      {[
+                        { text: "Tóm tắt & phân tích dữ liệu tệp này", label: "Phân Tích", icon: Sparkles, desc: "Trích xuất thông tin trọng tâm" },
+                        { text: "Viết kịch bản tự động hóa quy trình", label: "Quy Trình", icon: Activity, desc: "Tạo các webhook trigger" },
+                        { text: "Cấu hình tham số và kiểm tra công cụ", label: "Thiết Lập", icon: Bot, desc: "Tích hợp và kiểm thử API" }
+                      ].map((s, i) => (
+                        <button
+                          key={i}
+                          disabled={!agentId}
+                          onClick={() => {
+                            if (agentId) {
+                              setInputValue(s.text);
+                              handleChat(s.text);
+                              setInputValue("");
+                            }
+                          }}
+                          className="group text-left p-4 rounded-2xl border border-zinc-200/50 dark:border-white/[0.04] bg-white/40 dark:bg-zinc-900/10 hover:bg-white/80 dark:hover:bg-zinc-900/40 hover:border-primary/30 dark:hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 backdrop-blur-xl relative overflow-hidden active:scale-[0.98] disabled:opacity-50"
+                        >
+                          <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/20 text-primary transition-transform duration-300 group-hover:scale-110">
+                              <s.icon className="w-3.5 h-3.5" />
+                            </div>
+                            <span className="text-[9px] font-black uppercase tracking-widest text-primary leading-none">{s.label}</span>
+                          </div>
+                          <p className="text-xs font-bold text-foreground/80 group-hover:text-primary transition-colors line-clamp-1 mb-1 leading-snug">{s.text}</p>
+                          <p className="text-[10px] text-muted-foreground/60 leading-normal font-medium">{s.desc}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </motion.div>
+            )}
+
+            <div className={cn(
+              "relative w-full transition-all duration-500",
+              messages.length <= 1 ? "max-w-xl" : "max-w-3xl mx-auto"
+            )}>
+              <div className={cn(
+                "relative flex flex-col w-full bg-white/70 dark:bg-zinc-900/60 backdrop-blur-2xl border border-zinc-200/50 dark:border-white/[0.05] rounded-[1.5rem] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.05)] dark:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.3)] transition-all focus-within:ring-4 focus-within:ring-primary/5 focus-within:border-primary/40 p-1.5",
+                !agentId && "opacity-50 grayscale cursor-not-allowed"
+              )}>
+                <textarea
+                  ref={textareaRef}
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      if (inputValue.trim() && agentId) {
+                        handleChat(inputValue);
+                        setInputValue("");
+                      }
+                    }
+                  }}
+                  placeholder="Gửi tin nhắn..."
+                  disabled={!agentId}
+                  className="w-full bg-transparent border-none focus:ring-0 py-3 px-4 pr-12 min-h-[50px] max-h-48 resize-none text-sm font-semibold custom-scrollbar text-foreground placeholder:text-muted-foreground/40 focus:outline-none"
+                />
+                
+                <div className="absolute right-3.5 bottom-3.5 flex items-center gap-2">
+                  {isLoadingHistory && <Loader2 className="w-4 h-4 text-primary animate-spin" />}
+                  <button
+                    disabled={!inputValue.trim() || !agentId}
+                    onClick={() => {
+                      if (inputValue.trim() && agentId) {
+                        handleChat(inputValue);
+                        setInputValue("");
+                      }
+                    }}
+                    className={cn(
+                      "w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-300 active:scale-95 border-none outline-none",
+                      inputValue.trim() && agentId
+                        ? "bg-gradient-to-r from-primary to-emerald-600 dark:from-primary dark:to-emerald-500 text-white shadow-lg shadow-primary/25 cursor-pointer"
+                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 cursor-not-allowed"
+                    )}
+                  >
+                    <ArrowUp className="w-4.5 h-4.5 stroke-[3] text-white dark:text-white" />
+                  </button>
+                </div>
+              </div>
             </div>
+
+            {messages.length > 1 && (
+              <p className="text-[9px] text-center mt-2.5 text-muted-foreground/30 font-bold uppercase tracking-widest animate-pulse">
+                AI có thể phản hồi không chính xác. Hãy kiểm tra lại các thông tin quan trọng.
+              </p>
+            )}
           </div>
         </div>
 
-        {messages.length > 1 && (
-          <p className="text-[9px] text-center mt-2.5 text-muted-foreground/30 font-bold uppercase tracking-widest animate-pulse">
-            AI có thể phản hồi không chính xác. Hãy kiểm tra lại các thông tin quan trọng.
-          </p>
+        {/* Inspector Screen - replaces chat when active */}
+        {isEmbed && showInspector && (
+          <div className="flex-1 h-full p-3 animate-in fade-in duration-200">
+            <PlaygroundInspector
+              agentId={agentId}
+              activeMessageIndex={activeMessageIndex}
+              metrics={activeMessageIndex !== null ? messages[activeMessageIndex]?.metrics : null}
+              auditData={(activeMessageIndex !== null ? messages[activeMessageIndex]?.audit : []) ?? []}
+              isDone={(activeMessageIndex !== null ? messages[activeMessageIndex]?.done : false) ?? false}
+              activeTools={activeTools}
+              activeTab={inspectorTab}
+              setActiveTab={setInspectorTab}
+            />
+          </div>
         )}
       </div>
 

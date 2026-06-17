@@ -84,10 +84,31 @@ def make_conditional_router(node_id: str, edges: List[dict], node_data: dict):
                 is_match = False
                 if operator == "equals" and value == condition_val:
                     is_match = True
+                elif operator == "not_equals" and value != condition_val:
+                    is_match = True
                 elif operator == "contains" and condition_val in value:
                     is_match = True
                 elif operator == "starts_with" and value.startswith(condition_val):
                     is_match = True
+                elif operator == "is_empty" and not value:
+                    is_match = True
+                elif operator == "is_not_empty" and value:
+                    is_match = True
+                elif operator in ["greater_than", "less_than"]:
+                    try:
+                        # Try parsing as float for numeric comparison
+                        v_num = float(value)
+                        c_num = float(condition_val)
+                        if operator == "greater_than" and v_num > c_num:
+                            is_match = True
+                        elif operator == "less_than" and v_num < c_num:
+                            is_match = True
+                    except ValueError:
+                        # String fallback if not a number
+                        if operator == "greater_than" and value > condition_val:
+                            is_match = True
+                        elif operator == "less_than" and value < condition_val:
+                            is_match = True
                     
                 if is_match:
                     logger.info(f"🔀 [Workflow Routing] Branch matched: {handle_id} -> target: {edge['target']}")

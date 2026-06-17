@@ -32,6 +32,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const [isLoading, setIsLoading] = useState(false);
   const [activeFilter, setActiveFilter] = useState("all"); // all, unread, success, error, info
   const sseConnectedRef = useRef(false);
+  const sseRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sseRetryCountRef = useRef(0);
 
   // 1. Fetch notifications with filter
   const fetchNotifications = useCallback(async (isLoadMore = false) => {
@@ -51,7 +53,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       if (activeFilter === "unread") url += `&unread_only=true`;
       else if (activeFilter !== "all") url += `&type=${activeFilter}`;
 
-      const res = await fetchWithAuth(url);
+      const res = await fetchWithAuth(url, { skipAuthLogout: true });
       if (res.ok) {
         const data = await res.json();
         const items = data.items.map((n: any) => ({ 
@@ -137,43 +139,67 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     if (typeof window !== "undefined" && API_URL.includes("localhost")) {
       API_URL = API_URL.replace("localhost", "127.0.0.1");
     }
-    const eventSource = new EventSource(`${API_URL}/notifications/stream?token=${token}`);
-    sseConnectedRef.current = true;
+    let eventSource: EventSource | null = null;
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        const newNotif: Notification = {
-          ...data,
-          timestamp: new Date(data.created_at),
-          read: false
-        };
-        
-        // Cập nhật danh sách nếu phù hợp với bộ lọc hiện tại
-        if (activeFilter === "all" || activeFilter === "unread" || activeFilter === newNotif.type) {
-          setNotifications(prev => [newNotif, ...prev]);
+    const connect = () => {
+      const currentToken = localStorage.getItem("access_token");
+      if (!currentToken) return;
+
+      eventSource = new EventSource(`${API_URL}/notifications/stream?token=${currentToken}`);
+      sseConnectedRef.current = true;
+
+      eventSource.onopen = () => {
+        sseRetryCountRef.current = 0;
+      };
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const newNotif: Notification = {
+            ...data,
+            timestamp: new Date(data.created_at),
+            read: false
+          };
+
+          // Cập nhật danh sách nếu phù hợp với bộ lọc hiện tại
+          if (activeFilter === "all" || activeFilter === "unread" || activeFilter === newNotif.type) {
+            setNotifications(prev => [newNotif, ...prev]);
+          }
+          setUnreadCount(prev => prev + 1);
+
+          // Show Toast
+          setToasts(prev => [...prev, newNotif]);
+          setTimeout(() => {
+            setToasts(prev => prev.filter(t => t.id !== newNotif.id));
+          }, 4000);
+
+        } catch (error) {
+          console.error("Failed to parse SSE message:", error);
         }
-        setUnreadCount(prev => prev + 1);
-        
-        // Show Toast
-        setToasts(prev => [...prev, newNotif]);
-        setTimeout(() => {
-          setToasts(prev => prev.filter(t => t.id !== newNotif.id));
-        }, 4000);
+      };
 
-      } catch (error) {
-        console.error("Failed to parse SSE message:", error);
-      }
+      eventSource.onerror = () => {
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+        sseConnectedRef.current = false;
+
+        const delay = Math.min(1000 * 2 ** sseRetryCountRef.current, 15000);
+        sseRetryCountRef.current += 1;
+        if (sseRetryTimeoutRef.current) clearTimeout(sseRetryTimeoutRef.current);
+        sseRetryTimeoutRef.current = setTimeout(connect, delay);
+      };
     };
 
-    eventSource.onerror = (error) => {
-      console.error("SSE Error:", error);
-      eventSource.close();
-      sseConnectedRef.current = false;
-    };
+    connect();
 
     return () => {
-      eventSource.close();
+      if (sseRetryTimeoutRef.current) {
+        clearTimeout(sseRetryTimeoutRef.current);
+        sseRetryTimeoutRef.current = null;
+      }
+      if (eventSource) eventSource.close();
       sseConnectedRef.current = false;
     };
   }, [activeFilter]);

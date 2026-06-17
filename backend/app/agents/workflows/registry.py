@@ -7,6 +7,7 @@ from app.agents.workflows.nodes.tool import ToolNodeExecutor
 from app.agents.workflows.nodes.knowledge import KnowledgeNodeExecutor
 from app.agents.workflows.nodes.answer import AnswerNodeExecutor
 from app.agents.workflows.nodes.condition import ConditionNodeExecutor
+from app.agents.workflows.nodes.delay import DelayNodeExecutor
 
 class NodeExecutorRegistry:
     _registry: Dict[str, Type[BaseNodeExecutor]] = {
@@ -17,6 +18,7 @@ class NodeExecutorRegistry:
         "knowledge": KnowledgeNodeExecutor,
         "answer": AnswerNodeExecutor,
         "condition": ConditionNodeExecutor,
+        "delay": DelayNodeExecutor,
     }
 
     @classmethod

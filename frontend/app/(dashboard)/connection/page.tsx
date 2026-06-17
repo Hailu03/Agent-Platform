@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { fetchWithAuth } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,8 @@ import {
   Activity,
   Clock,
   ExternalLink,
-  AlertTriangle
+  AlertTriangle,
+  Network
 } from "lucide-react";
 
 type OauthConnectorItem = {
@@ -104,7 +106,7 @@ export default function ConnectionPage() {
         
         <div className="space-y-1.5">
           <h1 className="text-3xl font-extrabold tracking-tight text-foreground/90 flex items-center gap-2.5">
-            <Link2 className="w-8 h-8 text-purple-500" /> Kết nối ứng dụng (Connections)
+            Kết nối ứng dụng
           </h1>
           <p className="text-sm text-muted-foreground max-w-xl leading-relaxed">
             Ủy quyền truy cập thông qua giao thức OAuth 2.0 bảo mật để các Agent của bạn tương tác trực tiếp với các kênh liên lạc.
@@ -283,6 +285,61 @@ export default function ConnectionPage() {
               </Card>
             );
           })}
+          
+          {/* MCP Servers Card */}
+          <Card 
+            className="rounded-2xl border border-emerald-500/20 hover:border-emerald-500/40 hover:shadow-lg hover:shadow-emerald-500/[0.02] transition-all overflow-hidden bg-card group flex flex-col justify-between relative shadow-sm"
+          >
+            {/* Emerald line accent */}
+            <div className="absolute top-0 left-0 w-full h-[3px] bg-emerald-600" />
+
+            <CardContent className="p-6 space-y-6 relative z-10 flex-1 flex flex-col justify-between">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-xl flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 shadow-sm shrink-0 transition-transform duration-300 group-hover:scale-105">
+                    <Network className="w-7 h-7 text-emerald-600" />
+                  </div>
+                  
+                  <div className="space-y-1">
+                    <div className="font-extrabold text-lg text-foreground/90">Model Context Protocol (MCP)</div>
+                    <div className="text-xs text-muted-foreground leading-relaxed pr-2">
+                      Kết nối các máy chủ công cụ (Tool Servers) bên ngoài để mở rộng toolkit cho Trợ lý.
+                    </div>
+                  </div>
+                </div>
+
+                <Badge className="bg-emerald-500/10 text-emerald-600 border border-emerald-500/15 rounded-full text-[9px] font-bold px-2.5 py-0.5 uppercase tracking-wider flex items-center gap-1 shrink-0">
+                  JSON-RPC SSE
+                </Badge>
+              </div>
+
+              <div className="bg-secondary/40 border p-4.5 rounded-xl text-xs font-medium space-y-2.5 shadow-inner">
+                <div className="flex justify-between items-center text-muted-foreground">
+                  <span>Trạng thái kết nối:</span>
+                  <span className="font-bold text-emerald-600">Động (Dynamic tools)</span>
+                </div>
+                <div className="flex justify-between items-center text-muted-foreground">
+                  <span>Kiểu truyền nhận:</span>
+                  <span className="font-bold text-foreground/80 font-mono text-[10px]">SSE Handshake hoặc HTTP POST</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 pt-4 border-t mt-auto">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> MCP Standard V1
+                </span>
+
+                <Link href="/connection/mcp">
+                  <Button 
+                    className="rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-500/10 h-10 px-5 gap-1.5 transition-all"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Quản lý máy chủ
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>

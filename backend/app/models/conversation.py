@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, String, DateTime, ForeignKey, JSON, Boolean
 from sqlalchemy.sql import func
 import uuid
 from app.models.base import Base
@@ -12,6 +12,7 @@ class Conversation(Base):
     thread_id = Column(String, index=True, nullable=False) # LangGraph Thread ID
     title = Column(String, nullable=True)
     message = Column(String, nullable=True)
+    is_test = Column(Boolean, default=False, nullable=True) # Flag for test conversations
     thinking = Column(String, nullable=True)
     role = Column(String, nullable=True) # "user" or "assistant"
     

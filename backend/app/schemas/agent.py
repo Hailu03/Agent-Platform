@@ -19,6 +19,7 @@ class AgentBase(BaseModel):
     tools: List[Any] = [] # Can be string or {"name": str, "is_active": bool}
     skills: List[Any] = []
     sub_agents: List[str] = []
+    mcp_servers: Optional[List[str]] = []
     workflow_id: Optional[str] = None
     triggers: List[dict] = []
     knowledge_files: Optional[List[Any]] = []
@@ -44,6 +45,7 @@ class AgentUpdate(BaseModel):
     tools: Optional[List[Any]] = None
     skills: Optional[List[Any]] = None
     sub_agents: Optional[List[str]] = None
+    mcp_servers: Optional[List[str]] = None
     workflow_id: Optional[str] = None
     triggers: Optional[List[dict]] = None
     knowledge_files: Optional[List[Any]] = None

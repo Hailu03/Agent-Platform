@@ -12,7 +12,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const isChatPage = pathname === "/chat";
+  const isFullPage = pathname === "/chat" || (pathname && pathname.startsWith("/workflows/"));
 
   return (
     <NotificationProvider>
@@ -22,7 +22,7 @@ export default function DashboardLayout({
           <Header />
           <main className={cn(
             "flex-1 relative overflow-hidden",
-            !isChatPage && "p-8 overflow-y-auto"
+            !isFullPage && "p-8 overflow-y-auto"
           )}>
             {children}
           </main>

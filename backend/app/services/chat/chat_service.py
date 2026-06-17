@@ -1,4 +1,4 @@
-import json
+﻿import json
 from datetime import datetime
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
@@ -93,10 +93,63 @@ class ChatService:
         """Trả về đối tượng Store duy nhất của hệ thống"""
         return self.__class__._store
 
-    async def process_chat(self, agent_id: str, user_id: str, message: str, thread_id: str = None, command: dict = None):
-        agent_db = await self.agent_repo.get_by_id(agent_id, user_id)
-        if not agent_db:
-            raise HTTPException(status_code=404, detail="Agent not found")
+    async def process_chat(self, agent_id: str, user_id: str, message: str, thread_id: str = None, command: dict = None, is_test: bool = False):
+        # Check for Auto Agent Routing
+        if agent_id in ["router", "auto", "default"]:
+            agents = await self.agent_repo.list_by_user(user_id)
+            if not agents:
+                raise HTTPException(status_code=400, detail="No agents created yet. Please create an agent first.")
+            from app.agents.router_agent import get_or_create_router
+            _router_cfg = await get_or_create_router(self.agent_repo, user_id)
+            if _router_cfg.model_provider and _router_cfg.model_name:
+                try:
+                    from app.agents.factory import get_model
+                    llm = get_model(
+                        provider_name=_router_cfg.model_provider,
+                        model_name=_router_cfg.model_name,
+                        api_key=_router_cfg.api_key,
+                        streaming=False
+                    )
+                    agents_list = ""
+                    for idx, a in enumerate(agents):
+                        agents_list += f"{idx + 1}. Agent ID: '{a.id}' | Tên: '{a.name}' | Mô tả: '{a.description or 'Không có mô tả.'}'\n"
+
+                    prompt = f"""Bạn là một chuyên gia phân tuyến AI (Agent Router) thông minh.
+Nhiệm vụ của bạn là chọn ra Agent phù hợp từ danh sách bên dưới cho câu hỏi: "{message}"
+
+Danh sách các Agent:
+{agents_list}
+
+Yêu cầu chuyển mạch:
+1. Nếu câu hỏi chỉ là chào hỏi thông thường (như 'hi', 'xin chào', 'hello', 'chào bạn'), câu hỏi xã giao chitchat, hãy chọn 'router' làm agent_id để tự trả lời trực tiếp.
+2. Nếu câu hỏi liên quan đến nghiệp vụ chuyên biệt của Agent con, hãy chọn Agent con tương ứng.
+3. Trả về chính xác JSON:
+{{
+    "reason": "Lý do chọn hoặc tự trả lời",
+    "agent_id": "ID của Agent hoặc 'router'"
+}}
+"""
+                    from langchain_core.messages import HumanMessage
+                    import json as _json
+                    import re
+
+                    response = await llm.ainvoke([HumanMessage(content=prompt)])
+                    content_str = response.content if hasattr(response, "content") else str(response)
+                    content_str = re.sub(r'```json\s*|\s*```', '', content_str).strip()
+                    parsed = _json.loads(content_str)
+                    agent_id = parsed.get("agent_id") or "router"
+                except Exception:
+                    agent_id = "router"
+            else:
+                agent_id = "router"
+
+        if agent_id == "router":
+            from app.agents.router_agent import get_or_create_router
+            agent_db = await get_or_create_router(self.agent_repo, user_id)
+        else:
+            agent_db = await self.agent_repo.get_by_id(agent_id, user_id)
+            if not agent_db:
+                raise HTTPException(status_code=404, detail="Agent not found")
 
         guardrails = await self._get_system_guardrails()
         input_violations = []
@@ -129,20 +182,7 @@ class ChatService:
         checkpointer = AsyncPostgresSaver(pool)
         store = await self.get_store(pool)
         
-        # Load workflow dynamically if set
-        has_workflow = False
-        if agent_db.workflow_id:
-            from app.models.workflow import Workflow
-            result = await self.agent_repo.db.execute(select(Workflow).where(Workflow.id == agent_db.workflow_id))
-            workflow_db = result.scalar_one_or_none()
-            if workflow_db:
-                from app.agents.workflow_executor import WorkflowExecutor
-                executor = WorkflowExecutor(workflow_db.graph, agent_config)
-                graph = executor.app
-                has_workflow = True
-                
-        if not has_workflow:
-            graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
+        graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
         
         # Sử dụng thread_id cụ thể
         final_thread_id = thread_id or f"direct:{user_id}"
@@ -155,11 +195,8 @@ class ChatService:
         
         final_state = await graph.ainvoke(input_data, config=thread_config)
         
-        if has_workflow and "final_answer" in final_state:
-            content = final_state["final_answer"]
-        else:
-            ai_message = final_state["messages"][-1]
-            content = ai_message.content
+        ai_message = final_state["messages"][-1]
+        content = ai_message.content
             
         result = {"role": "assistant", "content": content}
 
@@ -393,36 +430,132 @@ class ChatService:
             message = f"{message} Ly do: {suffix}"
         return message
 
-    async def stream_chat(self, agent_id: str, user_id: str, message: str, thread_id: str = None, command: dict = None) -> StreamingResponse:
+    async def stream_chat(self, agent_id: str, user_id: str, message: str, thread_id: str = None, command: dict = None, is_test: bool = False) -> StreamingResponse:
         """
         API chính để chat với luồng dữ liệu (SSE) + Thread Isolation
         """
-        agent_db = await self.agent_repo.get_by_id(agent_id, user_id)
-        if not agent_db:
-             async def error_gen():
-                 yield f"data: {json.dumps({'error': 'Agent not found'})}\n\n"
-             return StreamingResponse(error_gen(), media_type="text/event-stream")
-
         # 1. Thread Management
         is_new_thread = False
-        if not thread_id and not command:
+        if is_test:
+            # Deterministic persistent test thread ID for this agent/user
+            thread_id = thread_id or f"test_{user_id}_{agent_id}"
+            
+            # Check if this thread has a conversation header record in db already
+            from sqlalchemy import select
+            stmt = select(Conversation).where(Conversation.thread_id == thread_id)
+            result = await self.agent_repo.db.execute(stmt)
+            existing = result.scalars().first()
+            if not existing:
+                is_new_thread = True
+        elif not thread_id and not command:
             import uuid
             thread_id = str(uuid.uuid4())
             is_new_thread = True
             logger.info(f"🆕 Tạo Thread mới: {thread_id}")
 
-        # 2. Kiểm tra Semantic Cache
+        # 2. Kiểm tra Semantic Cache (chỉ chạy nếu không phải là auto routing)
         cached_res = None
         cache_ref_text = ""
-        if message and message.strip():
-            cached_res = redis_cache.get_chat_cache(agent_id, user_id, message, agent_db=agent_db, thread_id=thread_id)
-            if cached_res:
-                logger.info(f"💡 Tìm thấy nhật ký tư duy cũ cho Thread {thread_id}")
-                old_thinking = cached_res.get("thinking", "Không có dữ liệu tư duy.")
-                old_content = cached_res.get("content", "")
-                cache_ref_text = f"--- NHẬT KÝ TƯ DUY CŨ ---\n{old_thinking}\n\n--- KẾT QUẢ CŨ ---\n{old_content}"
+        if message and message.strip() and agent_id not in ["router", "auto", "default"]:
+            agent_db = await self.agent_repo.get_by_id(agent_id, user_id)
+            if agent_db:
+                cached_res = redis_cache.get_chat_cache(agent_id, user_id, message, agent_db=agent_db, thread_id=thread_id)
+                if cached_res:
+                    logger.info(f"💡 Tìm thấy nhật ký tư duy cũ cho Thread {thread_id}")
+                    old_thinking = cached_res.get("thinking", "Không có dữ liệu tư duy.")
+                    old_content = cached_res.get("content", "")
+                    cache_ref_text = f"--- NHẬT KÝ TƯ DUY CŨ ---\n{old_thinking}\n\n--- KẾT QUẢ CŨ ---\n{old_content}"
 
         async def event_generator(): 
+            nonlocal agent_id, is_new_thread, thread_id
+            
+            # --- TỰ ĐỘNG CHUYỂN MẠCH AGENT (SEMANTIC ROUTER) ---
+            if agent_id in ["router", "auto", "default"]:
+                agents = await self.agent_repo.list_by_user(user_id)
+                if not agents:
+                    yield f"data: {json.dumps({'content': '⚠️ Bạn chưa tạo Trợ lý AI nào trong hệ thống. Vui lòng tạo Trợ lý trong mục **Tác tử (Agents)** trước khi sử dụng chat tự động định tuyến!'})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+
+                from app.agents.router_agent import get_or_create_router
+                _router_cfg = await get_or_create_router(self.agent_repo, user_id)
+                target_agent_id = "router"
+
+                if _router_cfg.model_provider and _router_cfg.model_name:
+                    try:
+                        from app.agents.factory import get_model
+                        llm = get_model(
+                            provider_name=_router_cfg.model_provider,
+                            model_name=_router_cfg.model_name,
+                            api_key=_router_cfg.api_key,
+                            streaming=False
+                        )
+
+                        agents_list = ""
+                        for idx, a in enumerate(agents):
+                            agents_list += f"{idx + 1}. Agent ID: '{a.id}' | Tên: '{a.name}' | Mô tả: '{a.description or 'Không có mô tả.'}'\n"
+
+                        prompt = f"""Bạn là một chuyên gia điều phối và phân tuyến (Agent Router) thông minh cho hệ thống AI.
+Nhiệm vụ của bạn là phân tích câu hỏi/yêu cầu của người dùng và chọn ra Agent phù hợp nhất từ danh sách Agent khả dụng bên dưới.
+
+Danh sách các Agent khả dụng trong hệ thống:
+{agents_list}
+
+Hãy phân tích câu hỏi của người dùng:
+"{message}"
+
+Yêu cầu chuyển mạch:
+1. Nếu câu hỏi chỉ là chào hỏi thông thường (ví dụ: 'hi', 'xin chào', 'hello', 'chào bạn'), câu hỏi tán gẫu, hỏi thăm xã giao thông thường, bạn BẮT BUỘC phải chọn 'router' làm agent_id để bạn (WAO Assistant) tự trả lời trực tiếp.
+2. Nếu câu hỏi yêu cầu chức năng, nghiệp vụ chuyên biệt của một Agent con nào đó trong danh sách (như gửi/tìm email, đọc/đăng bài fanpage, truy vấn dữ liệu SQL), hãy chọn Agent đó.
+3. Nếu câu hỏi quá chung chung hoặc không khớp với bất kỳ Agent con nào, hãy chọn 'router' làm agent_id để tự trả lời trực tiếp.
+4. Chỉ trả về một đối tượng JSON duy nhất có định dạng sau (không chứa bất kỳ giải thích nào khác ngoài JSON):
+{{
+    "reason": "Giải thích ngắn gọn bằng tiếng Việt lý do bạn chọn Agent này hoặc chọn tự trả lời",
+    "agent_id": "ID của Agent được chọn hoặc 'router'"
+}}
+"""
+                        from langchain_core.messages import HumanMessage
+                        import json as _json
+                        import re
+
+                        response = await llm.ainvoke([HumanMessage(content=prompt)])
+                        content_str = response.content if hasattr(response, "content") else str(response)
+                        content_str = re.sub(r'```json\s*|\s*```', '', content_str).strip()
+
+                        parsed = _json.loads(content_str)
+                        target_agent_id = parsed.get("agent_id") or "router"
+                        routed_reason = parsed.get("reason", "Tự động định tuyến chuyển mạch.")
+                    except Exception as e:
+                        logger.error(f"⚠️ Error during agent routing: {e}")
+                        target_agent_id = "router"
+
+                if target_agent_id in ["router", "auto", "default"]:
+                    agent_id = "router"
+                    yield f"data: {json.dumps({'status': 'Kết nối tới Trợ lý cá nhân WAO Assistant...'})}\n\n"
+                else:
+                    target_agent = next((a for a in agents if a.id == target_agent_id), agents[0])
+                    agent_id = target_agent.id
+
+                    from sqlalchemy import select
+                    stmt = select(Conversation).where(Conversation.thread_id == thread_id)
+                    result = await self.agent_repo.db.execute(stmt)
+                    existing = result.scalars().first()
+                    if not existing:
+                        is_new_thread = True
+
+                    yield f"data: {json.dumps({'status': f'Chuyển tiếp yêu cầu tới Trợ lý: {target_agent.name}...'})}\n\n"
+
+            # Fetch agent from DB now that we have resolved the final agent_id!
+            if agent_id == "router":
+                from app.agents.router_agent import get_or_create_router
+                agent_db = await get_or_create_router(self.agent_repo, user_id)
+            else:
+                agent_db = await self.agent_repo.get_by_id(agent_id, user_id)
+                if not agent_db:
+                    yield f"data: {json.dumps({'error': 'Agent not found'})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+
             agent_config = await self._get_agent_config(agent_db, current_user_id=user_id)
             guardrails = await self._get_system_guardrails()
 
@@ -487,19 +620,7 @@ class ChatService:
                 await stack.enter_async_context(store)
                 
                 logger.info("⚙️ Đang khởi tạo Graph...")
-                has_workflow = False
-                if agent_db.workflow_id:
-                    from app.models.workflow import Workflow
-                    result = await self.agent_repo.db.execute(select(Workflow).where(Workflow.id == agent_db.workflow_id))
-                    workflow_db = result.scalar_one_or_none()
-                    if workflow_db:
-                        from app.agents.workflow_executor import WorkflowExecutor
-                        executor = WorkflowExecutor(workflow_db.graph, agent_config)
-                        graph = executor.app
-                        has_workflow = True
-                        
-                if not has_workflow:
-                    graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
+                graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
                 
                 # Metadata isolation
                 thread_config = {
@@ -518,7 +639,8 @@ class ChatService:
                         thread_id=thread_id,
                         title=temp_title,
                         message=message,
-                        role="user"
+                        role="user",
+                        is_test=is_test
                     )
                     self.agent_repo.db.add(new_conv)
                     await self.agent_repo.db.commit()
@@ -577,8 +699,8 @@ class ChatService:
                             else:
                                 active_stream_run[node_name] = run_id
                             
-                            # Chỉ lấy content từ node chính (agent) hoặc answer node trong workflow
-                            is_output_node = node_name in ["agent"] or (has_workflow and "answer" in node_name)
+                            # Chỉ lấy content từ node chính (agent)
+                            is_output_node = node_name in ["agent"]
                             
                             chunk = event["data"]["chunk"]
                             content = chunk.content
@@ -894,6 +1016,7 @@ class ChatService:
     async def _get_agent_config(self, agent_db, current_user_id=None):
         # Implement "Deep Agents" Skill System pattern
         skills_system_prompt = ""
+        required_tools_from_skills = []
         if agent_db.skills:
             active_skills = [s for s in agent_db.skills if s.get("is_active", True)]
             if active_skills:
@@ -990,13 +1113,6 @@ class ChatService:
                     f"Default page: {fb_connection.selected_page_name or 'Unknown'} | ID: {fb_connection.selected_page_id or 'N/A'}\n"
                     "Available connected pages:\n"
                     f"{pages_text}\n"
-                    "Important rules:\n"
-                    "1. Facebook Fanpage tools automatically use the default connected page if page_id is omitted.\n"
-                    "2. Do NOT ask the user for page_id or access_token unless they explicitly want to override the default page.\n"
-                    "3. When the user asks to message a named customer, use facebook_find_contact or facebook_send_message(contact_query=...) instead of asking for PSID.\n"
-                    "4. For analytics/dashboard requests, prefer facebook_generate_dashboard so the UI can render charts.\n"
-                    "5. If the user asks which connected Fanpages are available, answer directly from the list above.\n"
-                    "6. If no page is connected, only then ask the user to reconnect or choose a page.\n"
                 )
 
         # Combine agent instructions with skills system prompt
@@ -1023,6 +1139,91 @@ class ChatService:
                     tools_list.append(tool_name)
                     existing.add(tool_name)
 
+        # Nạp động các công cụ từ máy chủ MCP ngoài (Model Context Protocol)
+        mcp_servers_ids = getattr(agent_db, "mcp_servers", []) or []
+        if mcp_servers_ids:
+            from app.models.mcp import MCPServer
+            from app.services.integrations.mcp_service import MCPClientService
+            from app.agents.tools.registry import sanitize_tool_name
+            from pydantic import create_model, Field
+            from langchain_core.tools import StructuredTool
+            from typing import Optional
+            
+            result = await self.agent_repo.db.execute(
+                select(MCPServer).where(MCPServer.id.in_(mcp_servers_ids), MCPServer.is_active == True)
+            )
+            mcp_servers = result.scalars().all()
+            
+            for server in mcp_servers:
+                try:
+                    mcp_tools_defs = await MCPClientService.fetch_tools_from_server(server)
+                    for mcp_tool_def in mcp_tools_defs:
+                        tool_name = mcp_tool_def["name"]
+                        sanitized_name = sanitize_tool_name(f"mcp__{server.name}__{tool_name}")
+                        desc = mcp_tool_def.get("description", f"Công cụ MCP {tool_name} từ máy chủ {server.name}")
+                        
+                        # Sử dụng default arguments để tránh bẫy closure scope trong vòng lặp Python
+                        async def _execute_mcp_tool(srv=server, name=tool_name, **kwargs):
+                            res = await MCPClientService.call_tool_on_server(srv, name, kwargs)
+                            if "content" in res:
+                                parts = []
+                                for item in res["content"]:
+                                    if item.get("type") == "text":
+                                        parts.append(item.get("text", ""))
+                                return "\n".join(parts)
+                            return str(res)
+                            
+                        def _execute_mcp_tool_sync(srv=server, name=tool_name, **kwargs):
+                            import asyncio
+                            try:
+                                loop = asyncio.get_event_loop()
+                            except RuntimeError:
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                            return loop.run_until_complete(_execute_mcp_tool(srv=srv, name=name, **kwargs))
+                            
+                        # Phân tích schema đầu vào thành Pydantic Model
+                        input_schema = mcp_tool_def.get("inputSchema", {})
+                        properties = input_schema.get("properties", {})
+                        required_fields = input_schema.get("required", [])
+                        
+                        fields = {}
+                        for field_name, field_prop in properties.items():
+                            field_type = field_prop.get("type", "string")
+                            py_type = str
+                            if field_type == "integer":
+                                py_type = int
+                            elif field_type == "number":
+                                py_type = float
+                            elif field_type == "boolean":
+                                py_type = bool
+                            elif field_type == "array":
+                                py_type = list
+                            elif field_type == "object":
+                                py_type = dict
+                                
+                            field_desc = field_prop.get("description", "")
+                            is_required = field_name in required_fields
+                            
+                            if is_required:
+                                fields[field_name] = (py_type, Field(..., description=field_desc))
+                            else:
+                                fields[field_name] = (Optional[py_type], Field(None, description=field_desc))
+                                
+                        args_schema = create_model(f"MCPInput_{sanitized_name}", **fields) if fields else None
+                        
+                        dynamic_tool = StructuredTool(
+                            name=sanitized_name,
+                            description=desc,
+                            func=_execute_mcp_tool_sync,
+                            coroutine=_execute_mcp_tool,
+                            args_schema=args_schema
+                        )
+                        tools_list.append(dynamic_tool)
+                        logger.info(f"✅ Tích hợp động công cụ MCP: {sanitized_name} cho Agent {agent_db.name}")
+                except Exception as e:
+                    logger.error(f"⚠️ Lỗi khi nạp MCP Server {server.name}: {e}")
+
         return {
             "id": agent_db.id,
             "user_id": agent_db.user_id,
@@ -1036,6 +1237,7 @@ class ChatService:
             "tools": tools_list,
             "knowledge_files": agent_db.knowledge_files or [],
             "skills": agent_db.skills or [],
+            "mcp_servers": mcp_servers_ids,
             "embedding_provider": agent_db.embedding_provider,
             "embedding_model": agent_db.embedding_model,
             "embedding_api_key": decrypt_password(agent_db.embedding_api_key) if agent_db.embedding_api_key else None,
@@ -1065,7 +1267,9 @@ class ChatService:
         from app.models.conversation import Conversation
         
         stmt = select(Conversation).where(Conversation.user_id == user_id)
-        if agent_id:
+        stmt = stmt.where(Conversation.is_test == False) # Bỏ qua các cuộc trò chuyện thử nghiệm
+        
+        if agent_id and agent_id not in ["router", "auto", "default"]:
             stmt = stmt.where(Conversation.agent_id == agent_id)
         
         stmt = stmt.order_by(desc(Conversation.updated_at))
@@ -1178,19 +1382,7 @@ class ChatService:
         checkpointer = AsyncPostgresSaver(pool)
         store = await self.get_store(pool)
         
-        has_workflow = False
-        if agent_db.workflow_id:
-            from app.models.workflow import Workflow
-            result = await self.agent_repo.db.execute(select(Workflow).where(Workflow.id == agent_db.workflow_id))
-            workflow_db = result.scalar_one_or_none()
-            if workflow_db:
-                from app.agents.workflow_executor import WorkflowExecutor
-                executor = WorkflowExecutor(workflow_db.graph, agent_config)
-                graph = executor.app
-                has_workflow = True
-                
-        if not has_workflow:
-            graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
+        graph = create_chat_graph(agent_config, checkpointer=checkpointer, store=store)
         
         config = {"configurable": {"thread_id": thread_id}}
         raw_history = [state async for state in graph.aget_state_history(config)]
